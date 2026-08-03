@@ -172,12 +172,36 @@ describe("SearchDatabase", () => {
   test("provides and persists provider-specific resume command templates", async () => {
     const database = await createDatabase();
 
-    expect(database.getResumeCommandTemplates()).toEqual({
+    expect(database.getResumeCommandTemplates()).toMatchObject({
       claude: "cd {cwd} && claude --resume {sessionId}",
       codex: "cd {cwd} && codex resume {sessionId}",
     });
 
     expect(database.updateResumeCommandTemplate("codex", "yolo").codex).toBe("yolo");
     expect(database.getResumeCommandTemplates().codex).toBe("yolo");
+  });
+
+  test("migrates the two-provider constraint and indexes a new provider", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "ai-session-search-provider-migration-"));
+    const path = join(directory, "search.db");
+    const legacy = new DatabaseSync(path);
+    legacy.exec(`
+      CREATE TABLE sessions (
+        session_key TEXT PRIMARY KEY, source_session_id TEXT NOT NULL,
+        provider TEXT NOT NULL CHECK(provider IN ('claude', 'codex')),
+        file_path TEXT NOT NULL UNIQUE, project_path TEXT, original_title TEXT NOT NULL,
+        started_at TEXT NOT NULL, updated_at TEXT NOT NULL, message_count INTEGER NOT NULL,
+        file_mtime_ms INTEGER NOT NULL, file_size INTEGER NOT NULL, indexed_at INTEGER NOT NULL
+      );
+    `);
+    legacy.close();
+    const database = new SearchDatabase(path);
+    cleanup.push(async () => {
+      database.close();
+      await rm(directory, { recursive: true, force: true });
+    });
+    const session = { ...sampleSession(), sessionKey: "pi:session-1", provider: "pi" as const };
+    database.upsertSession(session, { provider: "pi", path: session.filePath, mtimeMs: 1, size: 100 });
+    expect(database.search({ query: "支付回调", provider: "pi" })[0]?.provider).toBe("pi");
   });
 });

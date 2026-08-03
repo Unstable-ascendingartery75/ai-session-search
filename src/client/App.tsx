@@ -3,12 +3,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   CollectionSummary,
   NormalizedMessage,
+  ProviderDescriptor,
   ProviderId,
   ProviderStatus,
   ResumeCommandTemplates,
   SearchResult,
   SessionSummary,
 } from "../shared/types.ts";
+import { PROVIDER_DESCRIPTORS, providerDescriptor } from "../shared/providers.ts";
 import {
   DEFAULT_RESUME_COMMAND_TEMPLATES,
   renderResumeCommand,
@@ -33,8 +35,8 @@ const queryString = (values: Record<string, string | boolean | undefined>): stri
   return params.toString();
 };
 
-const providerLabel = (provider: ProviderId): string =>
-  provider === "claude" ? "Claude Code" : "Codex";
+const providerLabel = (provider: ProviderId): string => providerDescriptor(provider).label;
+const providerColor = (provider: ProviderId): string => providerDescriptor(provider).color;
 
 const isSearchResult = (item: SessionSummary | SearchResult): item is SearchResult =>
   "messageIndex" in item;
@@ -71,6 +73,7 @@ export const App = () => {
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [provider, setProvider] = useState<ProviderId | "all">("all");
+  const [providerDescriptors, setProviderDescriptors] = useState<ProviderDescriptor[]>(PROVIDER_DESCRIPTORS);
   const [projectPath, setProjectPath] = useState("");
   const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [renamedOnly, setRenamedOnly] = useState(false);
@@ -109,6 +112,9 @@ export const App = () => {
   }, [locale]);
 
   useEffect(() => {
+    jsonRequest<{ providers: ProviderDescriptor[] }>("/api/providers")
+      .then((data) => setProviderDescriptors(data.providers))
+      .catch((caught: unknown) => setError(String(caught)));
     jsonRequest<{ templates: ResumeCommandTemplates }>("/api/settings/resume-commands")
       .then((data) => setResumeCommandTemplates(data.templates))
       .catch((caught: unknown) => setError(String(caught)));
@@ -119,6 +125,14 @@ export const App = () => {
     const timer = window.setTimeout(() => setNotice(null), 2200);
     return () => window.clearTimeout(timer);
   }, [notice]);
+
+  useEffect(() => {
+    if (provider === "all" || status === null) return;
+    if ((status.counts[provider] ?? 0) === 0) {
+      setProvider("all");
+      setProjectPath("");
+    }
+  }, [provider, status]);
 
   const filters = useMemo(
     () => ({
@@ -230,7 +244,9 @@ export const App = () => {
 
   const copyResumeCommand = async (): Promise<void> => {
     if (selected === null) return;
-    const command = renderResumeCommand(resumeCommandTemplates[selected.session.provider], {
+    const template = resumeCommandTemplates[selected.session.provider];
+    if (template === undefined) return;
+    const command = renderResumeCommand(template, {
       sessionId: selected.session.sourceSessionId,
       cwd: selected.session.projectPath,
     });
@@ -319,6 +335,9 @@ export const App = () => {
   const visibleItems: Array<SessionSummary | SearchResult> =
     debouncedQuery === "" ? sessions : results;
   const visibleProjects = projects.filter((project) => provider === "all" || project.provider === provider);
+  const visibleProviders = providerDescriptors.filter(
+    (item) => (status?.counts[item.id] ?? 0) > 0,
+  );
   const collectionNames = new Map(collections.map((collection) => [collection.id, collection.name]));
 
   return (
@@ -346,8 +365,9 @@ export const App = () => {
         <div className="filters">
           <select value={provider} onChange={(event) => setProvider(event.target.value as ProviderId | "all") }>
             <option value="all">{t("filter.allProviders")}</option>
-            <option value="claude">Claude Code</option>
-            <option value="codex">Codex</option>
+            {visibleProviders.map((item) => (
+              <option key={item.id} value={item.id}>{item.label}</option>
+            ))}
           </select>
           <select
             className="project-filter"
@@ -459,7 +479,7 @@ export const App = () => {
                 onClick={() => void openSession(item.sessionKey, result?.messageIndex)}
               >
                 <div className="session-row-title">
-                  <span className={`provider-dot ${item.provider}`} />
+                  <span className="provider-dot" style={{ background: providerColor(item.provider) }} />
                   <strong>{item.displayTitle}</strong>
                   {item.favorite && <span className="favorite-star">★</span>}
                 </div>
@@ -487,8 +507,11 @@ export const App = () => {
         </div>
 
         <footer className="sidebar-footer">
-          <span>Claude {status?.counts.claude ?? 0}</span>
-          <span>Codex {status?.counts.codex ?? 0}</span>
+          {status?.providers
+            .filter((item) => status.counts[item.provider] > 0)
+            .map((item) => (
+              <span key={item.provider}>{providerLabel(item.provider)} {status.counts[item.provider]}</span>
+            ))}
           <button
             onClick={() => {
               setLoading(true);
@@ -509,7 +532,7 @@ export const App = () => {
             <h2>{t("welcome.title")}</h2>
             <p>{t("welcome.description")}</p>
             <div className="provider-status">
-              {status?.providers.map((item) => (
+              {status?.providers.filter((item) => status.counts[item.provider] > 0).map((item) => (
                 <div key={item.provider}>
                   <span className={`status-light ${item.detected ? "detected" : ""}`} />
                   <strong>{providerLabel(item.provider)}</strong>
@@ -522,7 +545,7 @@ export const App = () => {
           <>
             <header className="conversation-header">
               <div className="header-title">
-                <span className={`provider-pill ${selected.session.provider}`}>
+                <span className="provider-pill" style={{ background: providerColor(selected.session.provider) }}>
                   {providerLabel(selected.session.provider)}
                 </span>
                 {editingTitle ? (
@@ -551,19 +574,21 @@ export const App = () => {
                 <button title={t("session.copyId")} onClick={() => void copySessionId()}>
                   {t("session.copyId")}
                 </button>
-                <button title={t("session.copyResume")} onClick={() => void copyResumeCommand()}>
-                  {t("session.copyResume")}
-                </button>
-                <button
-                  onClick={() => {
-                    setResumeCommandDraft(
-                      resumeCommandTemplates[selected.session.provider],
-                    );
-                    setEditingResumeCommand((value) => !value);
-                  }}
-                >
-                  {t("resume.settings")}
-                </button>
+                {resumeCommandTemplates[selected.session.provider] !== undefined && (
+                  <>
+                    <button title={t("session.copyResume")} onClick={() => void copyResumeCommand()}>
+                      {t("session.copyResume")}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setResumeCommandDraft(resumeCommandTemplates[selected.session.provider] ?? "");
+                        setEditingResumeCommand((value) => !value);
+                      }}
+                    >
+                      {t("resume.settings")}
+                    </button>
+                  </>
+                )}
                 <button
                   title={
                     selected.session.favorite ? t("favorite.remove") : t("favorite.add")
@@ -628,9 +653,7 @@ export const App = () => {
                     <button onClick={() => void saveResumeCommand()}>{t("common.save")}</button>
                     <button
                       onClick={() =>
-                        setResumeCommandDraft(
-                          DEFAULT_RESUME_COMMAND_TEMPLATES[selected.session.provider],
-                        )
+                        setResumeCommandDraft(DEFAULT_RESUME_COMMAND_TEMPLATES[selected.session.provider] ?? "")
                       }
                     >
                       {t("resume.restoreDefault")}
@@ -671,9 +694,7 @@ export const App = () => {
                     <strong>
                       {message.role === "user"
                         ? t("message.you")
-                        : selected.session.provider === "codex"
-                          ? "Codex"
-                          : "Claude"}
+                        : providerLabel(selected.session.provider)}
                     </strong>
                     {message.phase !== undefined && (
                       <span>

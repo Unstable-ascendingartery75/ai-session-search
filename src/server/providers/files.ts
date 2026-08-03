@@ -45,6 +45,34 @@ export const discoverJsonlFiles = async (
   return files;
 };
 
+export const discoverFiles = async (
+  roots: readonly string[],
+  include: (path: string) => boolean,
+): Promise<Array<{ path: string; mtimeMs: number; size: number }>> => {
+  const files: Array<{ path: string; mtimeMs: number; size: number }> = [];
+  const pending = [...roots];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (current === undefined) continue;
+    let entries;
+    try {
+      entries = await readdir(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (entry.isSymbolicLink()) continue;
+      const child = join(current, entry.name);
+      if (entry.isDirectory()) pending.push(child);
+      else if (entry.isFile() && include(child)) {
+        const fileStat = await stat(child);
+        files.push({ path: child, mtimeMs: fileStat.mtimeMs, size: fileStat.size });
+      }
+    }
+  }
+  return files;
+};
+
 export const readJsonl = async (
   path: string,
   onRecord: (record: unknown, lineIndex: number) => void,

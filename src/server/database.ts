@@ -9,6 +9,8 @@ import type {
   SessionSummary,
 } from "../shared/types.ts";
 import { DEFAULT_RESUME_COMMAND_TEMPLATES } from "../shared/resumeCommand.ts";
+import { isProviderId } from "../shared/providers.ts";
+import { PROVIDER_IDS } from "../shared/types.ts";
 import type { SessionFile } from "./providers/types.ts";
 
 type SqlValue = string | number | bigint | Uint8Array | null;
@@ -42,8 +44,11 @@ const numberColumn = (row: SqlRow, key: string): number => {
   return typeof value === "number" ? value : Number(value ?? 0);
 };
 
-const providerColumn = (row: SqlRow): ProviderId =>
-  stringColumn(row, "provider") === "codex" ? "codex" : "claude";
+const providerColumn = (row: SqlRow): ProviderId => {
+  const provider = stringColumn(row, "provider");
+  if (!isProviderId(provider)) throw new Error(`Unsupported provider stored in database: ${provider}`);
+  return provider;
+};
 
 const toSessionSummary = (row: SqlRow): SessionSummary => {
   const originalTitle = stringColumn(row, "original_title");
@@ -82,7 +87,7 @@ export class SearchDatabase {
       CREATE TABLE IF NOT EXISTS sessions (
         session_key TEXT PRIMARY KEY,
         source_session_id TEXT NOT NULL,
-        provider TEXT NOT NULL CHECK(provider IN ('claude', 'codex')),
+        provider TEXT NOT NULL,
         file_path TEXT NOT NULL UNIQUE,
         project_path TEXT,
         original_title TEXT NOT NULL,
@@ -114,6 +119,7 @@ export class SearchDatabase {
         updated_at INTEGER NOT NULL
       );
     `);
+    this.#migrateProviderConstraint();
     const metadataColumns = this.#db.prepare("PRAGMA table_info(session_metadata)").all() as SqlRow[];
     if (!metadataColumns.some((row) => stringColumn(row, "name") === "collection_id")) {
       this.#db.exec("ALTER TABLE session_metadata ADD COLUMN collection_id INTEGER");
@@ -122,6 +128,35 @@ export class SearchDatabase {
       "CREATE INDEX IF NOT EXISTS idx_session_metadata_collection ON session_metadata(collection_id)",
     );
     this.#db.exec(FTS_DDL);
+  }
+
+  #migrateProviderConstraint(): void {
+    const row = this.#db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'sessions'").get() as SqlRow | undefined;
+    const sql = row === undefined ? "" : stringColumn(row, "sql");
+    if (!sql.includes("CHECK(provider IN ('claude', 'codex'))")) return;
+    this.#db.exec(`
+      BEGIN IMMEDIATE;
+      ALTER TABLE sessions RENAME TO sessions_provider_v1;
+      CREATE TABLE sessions (
+        session_key TEXT PRIMARY KEY,
+        source_session_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        file_path TEXT NOT NULL UNIQUE,
+        project_path TEXT,
+        original_title TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        message_count INTEGER NOT NULL,
+        file_mtime_ms INTEGER NOT NULL,
+        file_size INTEGER NOT NULL,
+        indexed_at INTEGER NOT NULL
+      );
+      INSERT INTO sessions SELECT * FROM sessions_provider_v1;
+      DROP TABLE sessions_provider_v1;
+      CREATE INDEX IF NOT EXISTS idx_sessions_provider ON sessions(provider);
+      CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON sessions(updated_at);
+      COMMIT;
+    `);
   }
 
   close(): void {
@@ -517,7 +552,7 @@ export class SearchDatabase {
       .all() as SqlRow[];
     for (const row of rows) {
       const provider = stringColumn(row, "key").replace("resume_command_template.", "");
-      if (provider === "claude" || provider === "codex") {
+      if (isProviderId(provider)) {
         templates[provider] = stringColumn(row, "value");
       }
     }
@@ -560,7 +595,7 @@ export class SearchDatabase {
   }
 
   countSessions(): Record<ProviderId, number> {
-    const result: Record<ProviderId, number> = { claude: 0, codex: 0 };
+    const result = Object.fromEntries(PROVIDER_IDS.map((provider) => [provider, 0])) as Record<ProviderId, number>;
     const rows = this.#db
       .prepare("SELECT provider, COUNT(*) count FROM sessions GROUP BY provider")
       .all() as SqlRow[];

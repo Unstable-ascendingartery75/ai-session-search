@@ -2,15 +2,18 @@
 
 English | [简体中文](./README.zh-CN.md)
 
+[![GitHub Release](https://img.shields.io/github/v/release/lililib/ai-session-search)](https://github.com/lililib/ai-session-search/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+
 A local-first, read-only search and viewer for AI coding sessions. It automatically discovers
-Claude Code and Codex conversations and indexes them with SQLite FTS5 trigram search, making it
+conversations from eleven supported coding agents and indexes them with SQLite FTS5 trigram search, making it
 easy to find natural language, code identifiers, file paths, and error messages.
 
 ![AI Session Search interface](./docs/images/ai-session-search.png)
 
 ## Features
 
-- Automatically discovers Claude Code and Codex sessions
+- Automatically discovers Claude Code, Codex, Antigravity, OpenCode, Hermes, GitHub Copilot CLI, Droid, OpenClaw, Cursor, Pi, and Kimi Code sessions
 - Searches across all providers or filters by provider and project
 - Full-text search powered by SQLite FTS5 trigram indexing
 - Substring fallback for two-character Chinese queries
@@ -26,13 +29,13 @@ easy to find natural language, code identifiers, file paths, and error messages.
 - Reindexes sessions automatically when source files change
 - Requires no Anthropic API, OpenAI API, or cloud database
 
-AI Session Search never modifies Claude Code or Codex session files. Custom titles, favorites,
+AI Session Search never modifies source session files. Custom titles, favorites,
 collections, settings, and the search index are stored only in the application's own SQLite
 database.
 
 ## Copy and resume commands
 
-Open a session to copy its Session ID or a complete resume command. The default templates are:
+Open a session to copy its Session ID or a complete resume command. Built-in templates are available for Claude Code, Codex, Antigravity, OpenCode, Hermes, Copilot CLI, Cursor, Pi, and Kimi Code. For example:
 
 ```text
 Claude Code: cd {cwd} && claude --resume {sessionId}
@@ -52,6 +55,7 @@ Paths are resolved using the following precedence:
 | --- | --- | --- | --- | --- |
 | Claude Code | `--claude-dir` | `AI_SESSION_CLAUDE_HOME` | `CLAUDE_CONFIG_DIR` | `~/.claude` |
 | Codex | `--codex-dir` | `AI_SESSION_CODEX_HOME` | `CODEX_HOME` | `~/.codex` |
+| Other providers | `--provider-dir provider=path` | `AI_SESSION_<PROVIDER>_HOME` | Provider-specific when available | See the table below |
 | Application data | `--data-dir` | `AI_SESSION_DATA_DIR` | `XDG_DATA_HOME` | Platform application data directory |
 
 ### Command-line options
@@ -64,8 +68,9 @@ Command-line options take precedence over environment variables.
 | `-h, --hostname <hostname>` | `HOSTNAME` | `localhost` | Hostname or network interface to listen on |
 | `--claude-dir <path>` | `AI_SESSION_CLAUDE_HOME`, then `CLAUDE_CONFIG_DIR` | `~/.claude` | Claude Code home directory |
 | `--codex-dir <path>` | `AI_SESSION_CODEX_HOME`, then `CODEX_HOME` | `~/.codex` | Codex home directory |
+| `--provider-dir <provider=path>` | Provider-specific | Provider-specific | Override a provider home; may be repeated |
 | `--data-dir <path>` | `AI_SESSION_DATA_DIR`, then `XDG_DATA_HOME` | Platform application data directory | Application database directory |
-| `--providers <providers>` | `AI_SESSION_PROVIDERS` | `auto` | `auto`, `claude`, `codex`, or a comma-separated provider list |
+| `--providers <providers>` | `AI_SESSION_PROVIDERS` | `auto` | `auto` or a comma-separated provider list |
 | `--no-watch` | — | Watching enabled | Disable automatic reindexing when session files change |
 | `--help` | — | — | Display CLI help |
 
@@ -74,6 +79,24 @@ Example:
 ```bash
 corepack pnpm start -- --hostname 127.0.0.1 --port 8080
 ```
+
+Supported provider IDs and default homes:
+
+| Provider ID | Client | Default home |
+| --- | --- | --- |
+| `claude` | Claude Code | `~/.claude` |
+| `codex` | Codex | `~/.codex` |
+| `antigravity` | Antigravity | `~/.gemini` |
+| `opencode` | OpenCode | `~/.local/share/opencode` |
+| `hermes` | Hermes | `~/.hermes` |
+| `copilot` | GitHub Copilot CLI | `~/.copilot` |
+| `droid` | Droid / Factory | `~/.factory` |
+| `openclaw` | OpenClaw | `~/.openclaw` |
+| `cursor` | Cursor | `~/.cursor` |
+| `pi` | Pi | `~/.pi` |
+| `kimi` | Kimi Code | `~/.kimi-code` |
+
+For example, `--provider-dir kimi=/custom/kimi --provider-dir pi=/custom/pi` overrides two homes without hardcoding a user directory. Only providers selected by `--providers` are scanned; `auto` enables automatic detection for all registered providers.
 
 Claude Code discovery:
 

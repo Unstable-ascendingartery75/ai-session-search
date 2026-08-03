@@ -7,28 +7,27 @@ import { createApp } from "./app.ts";
 import { type CliOptions, resolveConfig } from "./config.ts";
 import { SearchDatabase } from "./database.ts";
 import { SessionIndexer } from "./indexer.ts";
-import { createClaudeProvider } from "./providers/claude.ts";
-import { createCodexProvider } from "./providers/codex.ts";
+import { createEnabledProviders } from "./providers/registry.ts";
+
+const collectOption = (value: string, previous: string[]): string[] => [...previous, value];
 
 const program = new Command()
   .name("ai-session-search")
-  .description("Read-only local search for Claude Code and Codex conversations")
+  .description("Read-only local search for AI coding agent conversations")
   .option("-p, --port <port>", "port to listen on")
   .option("-h, --hostname <hostname>", "hostname to listen on")
   .option("--claude-dir <path>", "Claude Code home directory")
   .option("--codex-dir <path>", "Codex home directory")
+  .option("--provider-dir <provider=path>", "override a provider home directory (repeatable)", collectOption, [])
   .option("--data-dir <path>", "application database directory")
-  .option("--providers <providers>", "auto, claude, codex, or comma-separated values")
+  .option("--providers <providers>", "auto or comma-separated provider IDs")
   .option("--no-watch", "disable filesystem watching");
 
 program.action(async (rawOptions: CliOptions) => {
   const config = resolveConfig(rawOptions);
   await mkdir(config.dataDir, { recursive: true });
   const database = new SearchDatabase(join(config.dataDir, "search.db"));
-  const providers = [
-    ...(config.providers.has("claude") ? [createClaudeProvider(config.claudeHome)] : []),
-    ...(config.providers.has("codex") ? [createCodexProvider(config.codexHome)] : []),
-  ];
+  const providers = createEnabledProviders(config.providers, config.providerHomes);
   const indexer = new SessionIndexer(database, providers);
 
   const results = await indexer.syncAll();

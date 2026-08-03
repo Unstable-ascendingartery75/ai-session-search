@@ -50,7 +50,7 @@ button { color: inherit; }
 .original-title { -webkit-line-clamp: 1; }
 .session-meta { display: flex; justify-content: space-between; color: #999b96; font-size: 10px; }
 .empty-state { padding: 48px 12px; color: #888; text-align: center; font-size: 13px; }
-.sidebar-footer { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-top: 1px solid #e5e2da; color: #777; font-size: 11px; }
+.sidebar-footer { display: flex; align-items: center; gap: 12px; padding: 10px 16px; overflow-x: auto; border-top: 1px solid #e5e2da; color: #777; font-size: 11px; white-space: nowrap; }
 .sidebar-footer button { margin-left: auto; border: 0; background: transparent; cursor: pointer; color: #176b55; }
 
 .conversation-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; background: #f7f5ef; }

@@ -1,6 +1,27 @@
-export type ProviderId = "claude" | "codex";
+export const PROVIDER_IDS = [
+  "claude",
+  "codex",
+  "antigravity",
+  "opencode",
+  "hermes",
+  "copilot",
+  "droid",
+  "openclaw",
+  "cursor",
+  "pi",
+  "kimi",
+] as const;
 
-export type ResumeCommandTemplates = Record<ProviderId, string>;
+export type ProviderId = (typeof PROVIDER_IDS)[number];
+
+export type ResumeCommandTemplates = Partial<Record<ProviderId, string>>;
+
+export type ProviderDescriptor = {
+  id: ProviderId;
+  label: string;
+  color: string;
+  defaultResumeTemplate: string | null;
+};
 
 export type MessageRole = "user" | "assistant";
 

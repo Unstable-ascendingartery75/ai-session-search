@@ -2,7 +2,7 @@ import type { MessageId } from "./en.ts";
 
 export const messages: Record<MessageId, string> = {
   "app.name": "AI Session Search",
-  "app.description": "搜索本地 Claude Code 与 Codex 会话",
+  "app.description": "搜索本地 AI 编程工具会话",
   "app.tagline": "本地、只读、全文检索",
   "search.placeholder": "搜索会话内容或自定义名称…",
   "filter.allProviders": "全部来源",
@@ -26,7 +26,7 @@ export const messages: Record<MessageId, string> = {
   "sessions.rescan": "重新扫描",
   "welcome.title": "搜索你的本地 AI 编程会话",
   "welcome.description":
-    "自动发现 Claude Code 与 Codex 会话。所有索引和收藏信息仅保存在本机。",
+    "自动发现支持的 AI 编程工具会话。所有索引和收藏信息仅保存在本机。",
   "session.originalTitle": "原始标题：{title}",
   "session.copyId": "复制 Session ID",
   "session.copyResume": "复制恢复命令",

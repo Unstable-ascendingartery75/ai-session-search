@@ -4,12 +4,13 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { ProviderId } from "../shared/types.ts";
+import { isProviderId, PROVIDER_DESCRIPTORS } from "../shared/providers.ts";
 import type { AppConfig } from "./config.ts";
 import { SearchDatabase } from "./database.ts";
 import { SessionIndexer } from "./indexer.ts";
 
 const providerValue = (value: string | undefined): ProviderId | undefined =>
-  value === "claude" || value === "codex" ? value : undefined;
+  value !== undefined && isProviderId(value) ? value : undefined;
 
 const booleanValue = (value: string | undefined): boolean => value === "1" || value === "true";
 
@@ -44,6 +45,10 @@ export const createApp = (options: {
 }): Hono => {
   const { database, indexer, config } = options;
   const app = new Hono();
+
+  app.get("/api/providers", (context) => context.json({
+    providers: PROVIDER_DESCRIPTORS.filter((provider) => config.providers.has(provider.id)),
+  }));
 
   app.get("/api/status", async (context) =>
     context.json({

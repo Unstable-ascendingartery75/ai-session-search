@@ -4,7 +4,7 @@ import { DEFAULT_RESUME_COMMAND_TEMPLATES, renderResumeCommand } from "./resumeC
 describe("renderResumeCommand", () => {
   test("renders the default Codex resume command", () => {
     expect(
-      renderResumeCommand(DEFAULT_RESUME_COMMAND_TEMPLATES.codex, {
+      renderResumeCommand(DEFAULT_RESUME_COMMAND_TEMPLATES.codex!, {
         sessionId: "019fb22a-7602-7ad1-ae26-ead73fc25e3c",
         cwd: "/workspace/demo",
       }),

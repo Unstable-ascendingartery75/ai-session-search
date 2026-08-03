@@ -2,14 +2,17 @@
 
 [English](./README.md) | 简体中文
 
-一个本地优先、只读的 AI 编程会话搜索与阅读器。自动发现 Claude Code 和 Codex
+[![GitHub Release](https://img.shields.io/github/v/release/lililib/ai-session-search)](https://github.com/lililib/ai-session-search/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+
+一个本地优先、只读的 AI 编程会话搜索与阅读器。自动发现 11 种 AI 编程工具的
 会话，使用 SQLite FTS5 trigram 索引，适合搜索中文、代码标识符、文件路径和错误信息。
 
 ![AI Session Search 界面](./docs/images/ai-session-search.png)
 
 ## 功能
 
-- 自动发现 Claude Code 与 Codex 会话
+- 自动发现 Claude Code、Codex、Antigravity、OpenCode、Hermes、GitHub Copilot CLI、Droid、OpenClaw、Cursor、Pi 与 Kimi Code 会话
 - 搜索全部来源、指定来源或指定项目
 - SQLite FTS5 trigram 全文搜索
 - 两字中文查询自动使用子串搜索兜底
@@ -21,17 +24,17 @@
 - 创建、重命名和删除本地收藏夹
 - 将会话移动到收藏夹，或筛选尚未分类的会话
 - 一键复制 Session ID 或恢复命令
-- 分别自定义 Claude Code 与 Codex 的恢复命令模板
+- 按来源分别自定义恢复命令模板
 - 根据浏览器与系统首选语言自动切换简体中文或英文界面
 - 文件变化后自动重新索引
 - 不需要 Anthropic API、OpenAI API 或云端数据库
 
-本项目不会修改 Claude Code 或 Codex 的会话文件。自定义名称、收藏状态和搜索索引
+本项目不会修改任何来源的会话文件。自定义名称、收藏状态和搜索索引
 仅写入自己的 SQLite 数据库。
 
 ## 复制与恢复命令
 
-打开会话后可以直接复制 Session ID，或复制完整恢复命令。默认模板为：
+打开会话后可以直接复制 Session ID，或复制完整恢复命令。Claude Code、Codex、Antigravity、OpenCode、Hermes、Copilot CLI、Cursor、Pi 和 Kimi Code 提供内置模板，例如：
 
 ```text
 Claude Code: cd {cwd} && claude --resume {sessionId}
@@ -50,6 +53,7 @@ Codex:       cd {cwd} && codex resume {sessionId}
 | --- | --- | --- | --- | --- |
 | Claude Code | `--claude-dir` | `AI_SESSION_CLAUDE_HOME` | `CLAUDE_CONFIG_DIR` | `~/.claude` |
 | Codex | `--codex-dir` | `AI_SESSION_CODEX_HOME` | `CODEX_HOME` | `~/.codex` |
+| 其他来源 | `--provider-dir provider=path` | `AI_SESSION_<PROVIDER>_HOME` | 部分来源支持原生变量 | 见下表 |
 | 本应用数据 | `--data-dir` | `AI_SESSION_DATA_DIR` | `XDG_DATA_HOME` | 平台应用数据目录 |
 
 ### 命令行参数
@@ -62,8 +66,9 @@ Codex:       cd {cwd} && codex resume {sessionId}
 | `-h, --hostname <hostname>` | `HOSTNAME` | `localhost` | 要监听的主机名或网络接口 |
 | `--claude-dir <path>` | `AI_SESSION_CLAUDE_HOME`，其次 `CLAUDE_CONFIG_DIR` | `~/.claude` | Claude Code 主目录 |
 | `--codex-dir <path>` | `AI_SESSION_CODEX_HOME`，其次 `CODEX_HOME` | `~/.codex` | Codex 主目录 |
+| `--provider-dir <provider=path>` | 对应来源的环境变量 | 对应来源默认值 | 覆盖来源主目录，可重复使用 |
 | `--data-dir <path>` | `AI_SESSION_DATA_DIR`，其次 `XDG_DATA_HOME` | 平台应用数据目录 | 应用数据库目录 |
-| `--providers <providers>` | `AI_SESSION_PROVIDERS` | `auto` | `auto`、`claude`、`codex` 或逗号分隔的来源列表 |
+| `--providers <providers>` | `AI_SESSION_PROVIDERS` | `auto` | `auto` 或逗号分隔的来源列表 |
 | `--no-watch` | — | 默认启用监听 | 关闭会话文件变化后的自动重新索引 |
 | `--help` | — | — | 显示 CLI 帮助 |
 
@@ -72,6 +77,24 @@ Codex:       cd {cwd} && codex resume {sessionId}
 ```bash
 corepack pnpm start -- --hostname 127.0.0.1 --port 8080
 ```
+
+支持的来源 ID 和默认主目录：
+
+| 来源 ID | 客户端 | 默认主目录 |
+| --- | --- | --- |
+| `claude` | Claude Code | `~/.claude` |
+| `codex` | Codex | `~/.codex` |
+| `antigravity` | Antigravity | `~/.gemini` |
+| `opencode` | OpenCode | `~/.local/share/opencode` |
+| `hermes` | Hermes | `~/.hermes` |
+| `copilot` | GitHub Copilot CLI | `~/.copilot` |
+| `droid` | Droid / Factory | `~/.factory` |
+| `openclaw` | OpenClaw | `~/.openclaw` |
+| `cursor` | Cursor | `~/.cursor` |
+| `pi` | Pi | `~/.pi` |
+| `kimi` | Kimi Code | `~/.kimi-code` |
+
+例如，`--provider-dir kimi=/custom/kimi --provider-dir pi=/custom/pi` 可以覆盖两个来源的目录，不会写死任何用户路径。`--providers` 只扫描选中的来源；使用 `auto` 时会对所有已注册来源进行自动检测。
 
 Claude Code 扫描：
 

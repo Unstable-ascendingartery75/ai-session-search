@@ -3,6 +3,13 @@ import type { ResumeCommandTemplates } from "./types.ts";
 export const DEFAULT_RESUME_COMMAND_TEMPLATES: ResumeCommandTemplates = {
   claude: "cd {cwd} && claude --resume {sessionId}",
   codex: "cd {cwd} && codex resume {sessionId}",
+  antigravity: "cd {cwd} && agy --conversation {sessionId}",
+  opencode: "cd {cwd} && opencode --session {sessionId}",
+  hermes: "cd {cwd} && hermes --resume {sessionId}",
+  copilot: "cd {cwd} && copilot --resume={sessionId}",
+  cursor: "cd {cwd} && agent --resume {sessionId}",
+  pi: "cd {cwd} && pi --resume {sessionId}",
+  kimi: "cd {cwd} && kimi --session {sessionId}",
 };
 
 const shellQuote = (value: string): string => {

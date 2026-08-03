@@ -9,4 +9,14 @@ describe("resolveConfig", () => {
   test("honors Commander's negated --no-watch option", () => {
     expect(resolveConfig({ watch: false }).watch).toBe(false);
   });
+
+  test("enables every registered provider in auto mode and accepts path overrides", () => {
+    const config = resolveConfig({ providerDir: ["pi=/tmp/custom-pi"] });
+    expect(config.providers.has("kimi")).toBe(true);
+    expect(config.providerHomes.pi).toBe("/tmp/custom-pi");
+  });
+
+  test("rejects unknown providers", () => {
+    expect(() => resolveConfig({ providers: "claude,unknown" })).toThrow("Unknown provider");
+  });
 });

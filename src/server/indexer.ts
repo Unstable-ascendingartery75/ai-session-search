@@ -27,13 +27,16 @@ export class SessionIndexer {
 
   async status(): Promise<ProviderStatus[]> {
     return Promise.all(
-      this.#providers.map(async (provider) => ({
-        provider: provider.id,
-        enabled: true,
-        home: provider.home,
-        detected: await pathExists(provider.home),
-        sessionRoots: provider.sessionRoots,
-      })),
+      this.#providers.map(async (provider) => {
+        const rootStates = await Promise.all(provider.sessionRoots.map(pathExists));
+        return {
+          provider: provider.id,
+          enabled: true,
+          home: provider.home,
+          detected: rootStates.some(Boolean),
+          sessionRoots: provider.sessionRoots,
+        };
+      }),
     );
   }
 
@@ -47,7 +50,7 @@ export class SessionIndexer {
     const provider = this.#providers.find((candidate) => candidate.id === providerId);
     if (provider === undefined) throw new Error(`Provider is not enabled: ${providerId}`);
 
-    const detected = await pathExists(provider.home);
+    const detected = (await Promise.all(provider.sessionRoots.map(pathExists))).some(Boolean);
     if (!detected) {
       return { provider: providerId, discovered: 0, indexed: 0, unchanged: 0, removed: 0, errors: 0 };
     }

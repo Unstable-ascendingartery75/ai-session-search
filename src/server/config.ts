@@ -1,12 +1,15 @@
 import { homedir, platform } from "node:os";
 import { join, resolve } from "node:path";
-import type { ProviderId } from "../shared/types.ts";
+import { PROVIDER_IDS, type ProviderId } from "../shared/types.ts";
+import { isProviderId } from "../shared/providers.ts";
+import { resolveProviderHomes } from "./providers/registry.ts";
 
 export type CliOptions = {
   port?: string;
   hostname?: string;
   claudeDir?: string;
   codexDir?: string;
+  providerDir?: string[];
   dataDir?: string;
   providers?: string;
   watch?: boolean;
@@ -16,8 +19,7 @@ export type AppConfig = {
   port: number;
   hostname: string;
   dataDir: string;
-  claudeHome: string;
-  codexHome: string;
+  providerHomes: Record<ProviderId, string>;
   providers: ReadonlySet<ProviderId>;
   watch: boolean;
 };
@@ -41,33 +43,37 @@ const defaultDataDir = (): string => {
 
 const parseProviders = (value: string | undefined): ReadonlySet<ProviderId> => {
   if (value === undefined || value.trim() === "" || value === "auto") {
-    return new Set<ProviderId>(["claude", "codex"]);
+    return new Set<ProviderId>(PROVIDER_IDS);
   }
 
   const values = value
     .split(",")
     .map((item) => item.trim().toLowerCase())
-    .filter((item): item is ProviderId => item === "claude" || item === "codex");
+  const invalid = values.filter((item) => !isProviderId(item));
+  if (invalid.length > 0) throw new Error(`Unknown provider: ${invalid.join(", ")}`);
 
-  if (values.length === 0) {
-    throw new Error("--providers must contain claude, codex, or auto");
+  return new Set(values as ProviderId[]);
+};
+
+const parseProviderDirectories = (options: CliOptions): Partial<Record<ProviderId, string>> => {
+  const overrides: Partial<Record<ProviderId, string>> = {};
+  if (options.claudeDir !== undefined) overrides.claude = options.claudeDir;
+  if (options.codexDir !== undefined) overrides.codex = options.codexDir;
+  for (const item of options.providerDir ?? []) {
+    const separator = item.indexOf("=");
+    const id = separator < 0 ? "" : item.slice(0, separator).trim().toLowerCase();
+    const path = separator < 0 ? "" : item.slice(separator + 1).trim();
+    if (!isProviderId(id) || path === "") throw new Error(`--provider-dir must use provider=path; received ${item}`);
+    overrides[id] = path;
   }
-  return new Set(values);
+  return overrides;
 };
 
 export const resolveConfig = (options: CliOptions): AppConfig => ({
   port: Number.parseInt(options.port ?? env("PORT") ?? "3411", 10),
   hostname: options.hostname ?? env("HOSTNAME") ?? "localhost",
   dataDir: resolve(options.dataDir ?? env("AI_SESSION_DATA_DIR") ?? defaultDataDir()),
-  claudeHome: resolve(
-    options.claudeDir ??
-      env("AI_SESSION_CLAUDE_HOME") ??
-      env("CLAUDE_CONFIG_DIR") ??
-      join(homedir(), ".claude"),
-  ),
-  codexHome: resolve(
-    options.codexDir ?? env("AI_SESSION_CODEX_HOME") ?? env("CODEX_HOME") ?? join(homedir(), ".codex"),
-  ),
+  providerHomes: resolveProviderHomes(parseProviderDirectories(options)),
   providers: parseProviders(options.providers ?? env("AI_SESSION_PROVIDERS")),
   watch: options.watch !== false,
 });

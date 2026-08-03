@@ -1,8 +1,8 @@
 {
   "name": "ai-session-search",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "Read-only local search for Claude Code and Codex conversations.",
+  "description": "Read-only local search for AI coding agent conversations.",
   "type": "module",
   "bin": {
     "ai-session-search": "./dist/server/main.mjs"

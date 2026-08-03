@@ -1,6 +1,6 @@
 export const messages = {
   "app.name": "AI Session Search",
-  "app.description": "Search local Claude Code and Codex conversations",
+  "app.description": "Search local AI coding agent conversations",
   "app.tagline": "Local, read-only, full-text search",
   "search.placeholder": "Search session content or custom titles…",
   "filter.allProviders": "All providers",
@@ -24,7 +24,7 @@ export const messages = {
   "sessions.rescan": "Rescan",
   "welcome.title": "Search your local AI coding sessions",
   "welcome.description":
-    "Automatically discovers Claude Code and Codex sessions. All indexes and collections stay on this device.",
+    "Automatically discovers supported AI coding agent sessions. All indexes and collections stay on this device.",
   "session.originalTitle": "Original title: {title}",
   "session.copyId": "Copy Session ID",
   "session.copyResume": "Copy resume command",
