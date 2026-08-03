@@ -14,6 +14,9 @@ importers:
       '@lingui/core':
         specifier: 6.0.1
         version: 6.0.1
+      '@lingui/message-utils':
+        specifier: 6.0.1
+        version: 6.0.1
       '@lingui/react':
         specifier: 6.0.1
         version: 6.0.1(react@19.2.6)

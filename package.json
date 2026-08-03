@@ -25,6 +25,7 @@
   "dependencies": {
     "@hono/node-server": "2.0.1",
     "@lingui/core": "6.0.1",
+    "@lingui/message-utils": "6.0.1",
     "@lingui/react": "6.0.1",
     "commander": "14.0.3",
     "hono": "4.12.18",
