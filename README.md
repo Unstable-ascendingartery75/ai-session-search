@@ -1,87 +1,89 @@
 # AI Session Search
 
-一个本地优先、只读的 AI 编程会话搜索与阅读器。自动发现 Claude Code 和 Codex
-会话，使用 SQLite FTS5 trigram 索引，适合搜索中文、代码标识符、文件路径和错误信息。
+English | [简体中文](./README.zh-CN.md)
 
-> 当前为早期开发版本，工作名和公开仓库地址尚未最终确定。
+A local-first, read-only search and viewer for AI coding sessions. It automatically discovers
+Claude Code and Codex conversations and indexes them with SQLite FTS5 trigram search, making it
+easy to find natural language, code identifiers, file paths, and error messages.
 
-## 功能
+## Features
 
-- 自动发现 Claude Code 与 Codex 会话
-- 搜索全部来源、指定来源或指定项目
-- SQLite FTS5 trigram 全文搜索
-- 两字中文查询自动使用子串搜索兜底
-- 只读会话详情与命中消息定位
-- 自定义会话名称
-- 收藏或取消收藏会话
-- 筛选所有已重命名的会话
-- 搜索自定义名称，同时保留并展示原始标题
-- 创建、重命名和删除本地收藏夹
-- 将会话移动到收藏夹，或筛选尚未分类的会话
-- 一键复制 Session ID 或恢复命令
-- 分别自定义 Claude Code 与 Codex 的恢复命令模板
-- 根据浏览器与系统首选语言自动切换简体中文或英文界面
-- 文件变化后自动重新索引
-- 不需要 Anthropic API、OpenAI API 或云端数据库
+- Automatically discovers Claude Code and Codex sessions
+- Searches across all providers or filters by provider and project
+- Full-text search powered by SQLite FTS5 trigram indexing
+- Substring fallback for two-character Chinese queries
+- Read-only conversation viewer with matched-message navigation
+- Custom session titles
+- Favorite and renamed-session filters
+- Searches custom titles while preserving and displaying original titles
+- Creates, renames, and deletes local collections
+- Organizes sessions into collections or filters uncategorized sessions
+- Copies Session IDs and resume commands
+- Supports provider-specific custom resume command templates
+- Automatically selects English or Simplified Chinese from browser language preferences
+- Reindexes sessions automatically when source files change
+- Requires no Anthropic API, OpenAI API, or cloud database
 
-本项目不会修改 Claude Code 或 Codex 的会话文件。自定义名称、收藏状态和搜索索引
-仅写入自己的 SQLite 数据库。
+AI Session Search never modifies Claude Code or Codex session files. Custom titles, favorites,
+collections, settings, and the search index are stored only in the application's own SQLite
+database.
 
-## 复制与恢复命令
+## Copy and resume commands
 
-打开会话后可以直接复制 Session ID，或复制完整恢复命令。默认模板为：
+Open a session to copy its Session ID or a complete resume command. The default templates are:
 
 ```text
 Claude Code: cd {cwd} && claude --resume {sessionId}
 Codex:       cd {cwd} && codex resume {sessionId}
 ```
 
-`{cwd}` 会替换为会话记录的项目目录，`{sessionId}` 会替换为源 Session ID。模板按
-来源分别保存在应用数据库中。也可以只输入自定义前缀，例如 `yolo`，复制结果会自动
-变成 `yolo <session-id>`。
+`{cwd}` is replaced with the project directory recorded by the session, and `{sessionId}` is
+replaced with the source Session ID. Templates are stored separately for each provider in the
+application database. A custom prefix such as `yolo` is also valid and produces
+`yolo <session-id>`.
 
-## 自动发现与配置
+## Automatic discovery and configuration
 
-路径按以下优先级解析：
+Paths are resolved using the following precedence:
 
-| 数据 | CLI | 应用环境变量 | 原生环境变量 | 默认值 |
+| Data | CLI option | Application environment | Native environment | Default |
 | --- | --- | --- | --- | --- |
 | Claude Code | `--claude-dir` | `AI_SESSION_CLAUDE_HOME` | `CLAUDE_CONFIG_DIR` | `~/.claude` |
 | Codex | `--codex-dir` | `AI_SESSION_CODEX_HOME` | `CODEX_HOME` | `~/.codex` |
-| 本应用数据 | `--data-dir` | `AI_SESSION_DATA_DIR` | `XDG_DATA_HOME` | 平台应用数据目录 |
+| Application data | `--data-dir` | `AI_SESSION_DATA_DIR` | `XDG_DATA_HOME` | Platform application data directory |
 
-Claude Code 扫描：
+Claude Code discovery:
 
 ```text
 <claude-home>/projects/**/*.jsonl
 ```
 
-Codex 扫描：
+Codex discovery:
 
 ```text
 <codex-home>/sessions/**/*.jsonl
 <codex-home>/archived_sessions/**/*.jsonl
 ```
 
-`history.jsonl` 和 `session_index.jsonl` 不作为会话发现来源；Codex 的
-`session_index.jsonl` 只用于补充已有会话的标题。
+`history.jsonl` and `session_index.jsonl` are not used as session discovery sources. Codex
+`session_index.jsonl` is used only to enrich titles for sessions that were already discovered.
 
-## 国际化
+## Internationalization
 
-应用使用 Lingui 管理界面翻译，并根据浏览器提供的系统首选语言自动选择语言：
+The interface uses Lingui and automatically selects a locale from browser language preferences:
 
-- `zh-*`：简体中文
-- `en-*`：英文
-- 其他语言：回退为英文
+- `zh-*`: Simplified Chinese
+- `en-*`: English
+- Any other language: English fallback
 
-语言检测与翻译目录位于 `src/client/i18n/`。新增语言时需要增加对应 Catalog，并在
-`localeDetection.ts` 中注册语言标签映射。
+Locale detection and translation catalogs live in `src/client/i18n/`. To add a language, create
+its catalog and register its language-tag mapping in `localeDetection.ts`.
 
-## 本地开发
+## Local development
 
-要求：
+Requirements:
 
-- Node.js 24 或更高版本（使用内置 `node:sqlite`）
+- Node.js 24 or later, for the built-in `node:sqlite` module
 - pnpm 11
 
 ```bash
@@ -89,19 +91,19 @@ corepack pnpm install
 corepack pnpm dev
 ```
 
-开发模式：
+Development servers:
 
-- 前端：http://localhost:3410
-- 后端：http://localhost:3411
+- Frontend: http://localhost:3410
+- Backend: http://localhost:3411
 
-生产构建：
+Production build:
 
 ```bash
 corepack pnpm build
 corepack pnpm start
 ```
 
-只启用 Codex，并指定自定义目录：
+Enable only Codex and provide custom directories:
 
 ```bash
 corepack pnpm start -- \
@@ -110,13 +112,13 @@ corepack pnpm start -- \
   --data-dir /path/to/app-data
 ```
 
-关闭文件监听：
+Disable file watching:
 
 ```bash
 corepack pnpm start -- --no-watch
 ```
 
-## 验证
+## Validation
 
 ```bash
 corepack pnpm test
@@ -124,16 +126,18 @@ corepack pnpm typecheck
 corepack pnpm build
 ```
 
-## 隐私边界
+## Privacy boundaries
 
-- 索引完全保存在本地。
-- 不读取 `auth.json`、API Key 或登录凭证。
-- 只复制恢复命令，不执行、发送、恢复或继续任何会话。
-- 不执行会话中的命令或工具调用。
-- 远程暴露服务前应自行增加认证和网络访问控制；首版默认仅监听 `localhost`。
+- The index stays entirely on the local device.
+- The application does not read `auth.json`, API keys, or login credentials.
+- It copies resume commands but never executes, sends, resumes, or continues sessions.
+- It never executes commands or tool calls found in session content.
+- Add authentication and network access controls before exposing the service remotely. By
+  default, it listens only on `localhost`.
 
-## 上游与许可证
+## Upstream and license
 
-搜索架构参考并改编自
-[d-kimuson/claude-code-viewer](https://github.com/d-kimuson/claude-code-viewer)，
-上游采用 MIT License。详细署名见 [NOTICE.md](./NOTICE.md)。本项目同样采用 MIT License。
+The search architecture is inspired by and adapted from
+[d-kimuson/claude-code-viewer](https://github.com/d-kimuson/claude-code-viewer), which is licensed
+under the MIT License. See [NOTICE.md](./NOTICE.md) for attribution. This project is also licensed
+under the MIT License.
