@@ -5,6 +5,8 @@
 一个本地优先、只读的 AI 编程会话搜索与阅读器。自动发现 Claude Code 和 Codex
 会话，使用 SQLite FTS5 trigram 索引，适合搜索中文、代码标识符、文件路径和错误信息。
 
+![AI Session Search 界面](./docs/images/ai-session-search.png)
+
 ## 功能
 
 - 自动发现 Claude Code 与 Codex 会话
@@ -49,6 +51,27 @@ Codex:       cd {cwd} && codex resume {sessionId}
 | Claude Code | `--claude-dir` | `AI_SESSION_CLAUDE_HOME` | `CLAUDE_CONFIG_DIR` | `~/.claude` |
 | Codex | `--codex-dir` | `AI_SESSION_CODEX_HOME` | `CODEX_HOME` | `~/.codex` |
 | 本应用数据 | `--data-dir` | `AI_SESSION_DATA_DIR` | `XDG_DATA_HOME` | 平台应用数据目录 |
+
+### 命令行参数
+
+命令行参数的优先级高于环境变量。
+
+| 参数 | 环境变量 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `-p, --port <port>` | `PORT` | `3411` | Web 服务监听端口 |
+| `-h, --hostname <hostname>` | `HOSTNAME` | `localhost` | 要监听的主机名或网络接口 |
+| `--claude-dir <path>` | `AI_SESSION_CLAUDE_HOME`，其次 `CLAUDE_CONFIG_DIR` | `~/.claude` | Claude Code 主目录 |
+| `--codex-dir <path>` | `AI_SESSION_CODEX_HOME`，其次 `CODEX_HOME` | `~/.codex` | Codex 主目录 |
+| `--data-dir <path>` | `AI_SESSION_DATA_DIR`，其次 `XDG_DATA_HOME` | 平台应用数据目录 | 应用数据库目录 |
+| `--providers <providers>` | `AI_SESSION_PROVIDERS` | `auto` | `auto`、`claude`、`codex` 或逗号分隔的来源列表 |
+| `--no-watch` | — | 默认启用监听 | 关闭会话文件变化后的自动重新索引 |
+| `--help` | — | — | 显示 CLI 帮助 |
+
+示例：
+
+```bash
+corepack pnpm start -- --hostname 127.0.0.1 --port 8080
+```
 
 Claude Code 扫描：
 

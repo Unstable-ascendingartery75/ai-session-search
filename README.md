@@ -6,6 +6,8 @@ A local-first, read-only search and viewer for AI coding sessions. It automatica
 Claude Code and Codex conversations and indexes them with SQLite FTS5 trigram search, making it
 easy to find natural language, code identifiers, file paths, and error messages.
 
+![AI Session Search interface](./docs/images/ai-session-search.png)
+
 ## Features
 
 - Automatically discovers Claude Code and Codex sessions
@@ -51,6 +53,27 @@ Paths are resolved using the following precedence:
 | Claude Code | `--claude-dir` | `AI_SESSION_CLAUDE_HOME` | `CLAUDE_CONFIG_DIR` | `~/.claude` |
 | Codex | `--codex-dir` | `AI_SESSION_CODEX_HOME` | `CODEX_HOME` | `~/.codex` |
 | Application data | `--data-dir` | `AI_SESSION_DATA_DIR` | `XDG_DATA_HOME` | Platform application data directory |
+
+### Command-line options
+
+Command-line options take precedence over environment variables.
+
+| Option | Environment variable | Default | Description |
+| --- | --- | --- | --- |
+| `-p, --port <port>` | `PORT` | `3411` | Port used by the web server |
+| `-h, --hostname <hostname>` | `HOSTNAME` | `localhost` | Hostname or network interface to listen on |
+| `--claude-dir <path>` | `AI_SESSION_CLAUDE_HOME`, then `CLAUDE_CONFIG_DIR` | `~/.claude` | Claude Code home directory |
+| `--codex-dir <path>` | `AI_SESSION_CODEX_HOME`, then `CODEX_HOME` | `~/.codex` | Codex home directory |
+| `--data-dir <path>` | `AI_SESSION_DATA_DIR`, then `XDG_DATA_HOME` | Platform application data directory | Application database directory |
+| `--providers <providers>` | `AI_SESSION_PROVIDERS` | `auto` | `auto`, `claude`, `codex`, or a comma-separated provider list |
+| `--no-watch` | — | Watching enabled | Disable automatic reindexing when session files change |
+| `--help` | — | — | Display CLI help |
+
+Example:
+
+```bash
+corepack pnpm start -- --hostname 127.0.0.1 --port 8080
+```
 
 Claude Code discovery:
 
