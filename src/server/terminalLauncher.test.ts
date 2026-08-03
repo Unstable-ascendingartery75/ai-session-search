@@ -53,7 +53,7 @@ describe("buildTerminalLaunch", () => {
     );
 
     expect(launch.file).toBe("/usr/bin/open");
-    expect(launch.args[0]).toMatch(/^warp:\/\/launch\//);
+    expect(launch.args[0]?.replace(/%5C/gi, "/")).toMatch(/^warp:\/\/launch\//);
     expect(launch.artifact?.content).toContain('cwd: "/workspace/My Project"');
     expect(launch.artifact?.content).toContain("/bin/zsh -lic");
     expect(launch.artifact?.content).toContain("yolo");

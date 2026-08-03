@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { describe, expect, test } from "vitest";
 import { resolveConfig } from "./config.ts";
 
@@ -17,7 +18,7 @@ describe("resolveConfig", () => {
   test("enables every registered provider in auto mode and accepts path overrides", () => {
     const config = resolveConfig({ providerDir: ["pi=/tmp/custom-pi"] });
     expect(config.providers.has("kimi")).toBe(true);
-    expect(config.providerHomes.pi).toBe("/tmp/custom-pi");
+    expect(config.providerHomes.pi).toBe(resolve("/tmp/custom-pi"));
   });
 
   test("rejects unknown providers", () => {

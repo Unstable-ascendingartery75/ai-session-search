@@ -9,6 +9,9 @@ on:
 permissions:
   contents: read
 
+env:
+  PNPM_CONFIG_NODE_LINKER: hoisted
+
 jobs:
   build:
     name: ${{ matrix.name }}
