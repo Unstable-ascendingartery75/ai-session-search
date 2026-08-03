@@ -1,4 +1,3 @@
-const { MakerSquirrel } = require("@electron-forge/maker-squirrel");
 const { MakerZIP } = require("@electron-forge/maker-zip");
 
 module.exports = {
@@ -28,14 +27,5 @@ module.exports = {
     ],
   },
   rebuildConfig: {},
-  makers: [
-    new MakerSquirrel({
-      name: "ai_session_search",
-      authors: "lililib",
-      description: "Read-only local search for AI coding agent conversations.",
-      setupExe: "AI-Session-Search-Setup.exe",
-      setupIcon: "assets/icon.ico",
-    }),
-    new MakerZIP({}, ["darwin"]),
-  ],
+  makers: [new MakerZIP({}, ["darwin", "win32"])],
 };

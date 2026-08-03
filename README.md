@@ -17,15 +17,17 @@ Download from [GitHub Releases](https://github.com/lililib/ai-session-search/rel
 
 - macOS Apple Silicon: `darwin-arm64.zip`
 - macOS Intel: `darwin-x64.zip`
-- Windows x64: `AI-Session-Search-Setup.exe`
+- Windows x64 portable: `AI.Session.Search-win32-x64-<version>.zip`
 
 The desktop client requires no Node.js installation. It displays the interface immediately, scans
 sessions in the background, and reports indexing progress. Its database uses the current user's
 system application-data directory and contains no developer-specific paths.
 
 Current packages are unsigned, so Gatekeeper or SmartScreen may show a first-launch warning.
-**Open in terminal** currently supports macOS only; Windows provides full search, reading,
-organization, and resume-command copying.
+The Windows build is portable: extract the ZIP and run `ai-session-search.exe`; no installer is
+included.
+**Open in terminal** supports macOS and Windows. Windows Terminal opens a new tab in the most
+recent window and falls back to PowerShell when `wt.exe` is unavailable.
 
 ## Highlights
 
@@ -34,6 +36,7 @@ organization, and resume-command copying.
 - Favorites, custom titles, collections, and matching filters
 - Copies Session IDs and customizable resume commands
 - macOS integration with Terminal, iTerm2, Warp, and custom terminal/shell paths
+- Windows integration with Windows Terminal, PowerShell, Command Prompt, and custom executables
 - Resizable sidebar with persisted width
 - Background incremental indexing and filesystem watching
 - Automatic English/Simplified Chinese UI; no API key or cloud database required
@@ -102,7 +105,8 @@ Codex:       cd {cwd} && codex resume {sessionId}
 `{cwd}` and `{sessionId}` are replaced from the session. A template containing only `yolo`
 automatically receives the Session ID. macOS terminal execution uses a configurable absolute shell
 path with `-lic`, so aliases from files such as `~/.zshrc` are available. iTerm2 opens a tab in the
-current window when possible.
+current window when possible. On Windows, commands use PowerShell or Command Prompt syntax;
+Windows Terminal targets the most recent window with `wt.exe -w 0 new-tab`.
 
 ## Development and releases
 

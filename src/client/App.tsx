@@ -7,6 +7,7 @@ import type {
   ProviderId,
   ProviderStatus,
   ResumeCommandTemplates,
+  RuntimePlatform,
   SearchResult,
   SessionSummary,
   SyncProgress,
@@ -20,6 +21,11 @@ import {
 } from "../shared/resumeCommand.ts";
 import type { Translator } from "./i18n/index.ts";
 import {
+  commandDialectForTerminal,
+  defaultTerminalSettings,
+  terminalIdsForPlatform,
+} from "../shared/terminal.ts";
+import {
   clampSidebarWidth,
   DEFAULT_SIDEBAR_WIDTH,
   parseStoredSidebarWidth,
@@ -32,15 +38,12 @@ type AppStatus = {
   providers: ProviderStatus[];
   counts: Record<ProviderId, number>;
   sync: SyncProgress;
+  runtimePlatform: RuntimePlatform;
 };
 
 const GITHUB_URL = "https://github.com/lililib/ai-session-search";
 
-const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
-  terminal: "terminal",
-  customPath: null,
-  shellPath: "/bin/zsh",
-};
+const DEFAULT_TERMINAL_SETTINGS = defaultTerminalSettings("darwin");
 
 const initialSidebarWidth = (): number => {
   try {
@@ -140,6 +143,14 @@ export const App = () => {
   const sidebarWidthRef = useRef(sidebarWidth);
   const resizingSidebarRef = useRef(false);
   const messageRefs = useRef(new Map<number, HTMLElement>());
+  const runtimePlatform = status?.runtimePlatform ?? "other";
+  const availableTerminalIds = terminalIdsForPlatform(runtimePlatform);
+  const terminalSupported = availableTerminalIds.length > 0;
+  const commandDialect = commandDialectForTerminal(
+    terminalSettings.terminal,
+    runtimePlatform,
+    terminalSettings.shellPath,
+  );
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedQuery(query.trim()), 220);
@@ -303,7 +314,7 @@ export const App = () => {
     const command = renderResumeCommand(template, {
       sessionId: selected.session.sourceSessionId,
       cwd: selected.session.projectPath,
-    });
+    }, commandDialect);
     try {
       await copyText(command, t("error.clipboardUnavailable"));
       setNotice(t("notice.resumeCopied", { command }));
@@ -314,12 +325,6 @@ export const App = () => {
 
   const openResumeInTerminal = async (): Promise<void> => {
     if (selected === null) return;
-    const template = resumeCommandTemplates[selected.session.provider];
-    if (template === undefined) return;
-    const command = renderResumeCommand(template, {
-      sessionId: selected.session.sourceSessionId,
-      cwd: selected.session.projectPath,
-    });
     try {
       await jsonRequest(`/api/sessions/${encodeURIComponent(selected.session.sessionKey)}/open-terminal`, {
         method: "POST",
@@ -330,6 +335,28 @@ export const App = () => {
     } catch (caught) {
       setError(String(caught));
     }
+  };
+
+  const updateTerminalDraft = (nextTerminal: TerminalId): void => {
+    setTerminalDraft(nextTerminal);
+    if (runtimePlatform !== "win32") return;
+    if (nextTerminal === "cmd") {
+      setShellPathDraft("cmd.exe");
+    } else if (nextTerminal === "powershell") {
+      setShellPathDraft((current) => /(^|[\\/])pwsh(?:\.exe)?$/i.test(current) ? current : "powershell.exe");
+    } else if (nextTerminal === "windows-terminal" && /(^|[\\/])cmd(?:\.exe)?$/i.test(shellPathDraft)) {
+      setShellPathDraft("powershell.exe");
+    }
+  };
+
+  const terminalLabel = (terminal: TerminalId): string => {
+    if (terminal === "windows-terminal") return "Windows Terminal";
+    if (terminal === "powershell") return "PowerShell";
+    if (terminal === "cmd") return t("terminal.commandPrompt");
+    if (terminal === "terminal") return "Terminal";
+    if (terminal === "iterm2") return "iTerm2";
+    if (terminal === "warp") return "Warp";
+    return t("terminal.custom");
   };
 
   const saveCommandSettings = async (): Promise<void> => {
@@ -783,9 +810,11 @@ export const App = () => {
                     <button title={t("session.copyResume")} onClick={() => void copyResumeCommand()}>
                       {t("session.copyResume")}
                     </button>
-                    <button title={t("session.openTerminal")} onClick={() => void openResumeInTerminal()}>
-                      {t("session.openTerminal")}
-                    </button>
+                    {terminalSupported && (
+                      <button title={t("session.openTerminal")} onClick={() => void openResumeInTerminal()}>
+                        {t("session.openTerminal")}
+                      </button>
+                    )}
                     <button
                       onClick={() => {
                         setResumeCommandDraft(resumeCommandTemplates[selected.session.provider] ?? "");
@@ -883,42 +912,47 @@ export const App = () => {
                       {renderResumeCommand(resumeCommandDraft, {
                         sessionId: selected.session.sourceSessionId,
                         cwd: selected.session.projectPath,
-                      })}
+                      }, commandDialect)}
                     </code>
                   )}
-                  <div className="terminal-settings">
-                    <label htmlFor="terminal-kind">{t("terminal.type")}</label>
-                    <select
-                      id="terminal-kind"
-                      value={terminalDraft}
-                      onChange={(event) => setTerminalDraft(event.target.value as TerminalId)}
-                    >
-                      <option value="terminal">Terminal</option>
-                      <option value="iterm2">iTerm2</option>
-                      <option value="warp">Warp</option>
-                      <option value="custom">{t("terminal.custom")}</option>
-                    </select>
-                    {terminalDraft === "custom" && (
-                      <input
-                        value={customTerminalPathDraft}
-                        onChange={(event) => setCustomTerminalPathDraft(event.target.value)}
-                        placeholder="/Applications/Ghostty.app"
-                        maxLength={1000}
-                      />
-                    )}
-                  </div>
-                  <div className="terminal-settings shell-settings">
-                    <label htmlFor="terminal-shell-path">{t("terminal.shellPath")}</label>
-                    <input
-                      id="terminal-shell-path"
-                      value={shellPathDraft}
-                      onChange={(event) => setShellPathDraft(event.target.value)}
-                      placeholder="/bin/zsh"
-                      maxLength={1000}
-                    />
-                  </div>
-                  <p>{t("terminal.pathHelp")}</p>
-                  <p>{t("terminal.shellPathHelp")}</p>
+                  {terminalSupported && (
+                    <>
+                      <div className="terminal-settings">
+                        <label htmlFor="terminal-kind">{t("terminal.type")}</label>
+                        <select
+                          id="terminal-kind"
+                          value={terminalDraft}
+                          onChange={(event) => updateTerminalDraft(event.target.value as TerminalId)}
+                        >
+                          {availableTerminalIds.map((terminal) => (
+                            <option key={terminal} value={terminal}>{terminalLabel(terminal)}</option>
+                          ))}
+                        </select>
+                        {terminalDraft === "custom" && (
+                          <input
+                            value={customTerminalPathDraft}
+                            onChange={(event) => setCustomTerminalPathDraft(event.target.value)}
+                            placeholder={runtimePlatform === "win32" ? "C:\\Program Files\\WezTerm\\wezterm-gui.exe" : "/Applications/Ghostty.app"}
+                            maxLength={1000}
+                          />
+                        )}
+                      </div>
+                      <div className="terminal-settings shell-settings">
+                        <label htmlFor="terminal-shell-path">
+                          {runtimePlatform === "win32" ? t("terminal.shellExecutable") : t("terminal.shellPath")}
+                        </label>
+                        <input
+                          id="terminal-shell-path"
+                          value={shellPathDraft}
+                          onChange={(event) => setShellPathDraft(event.target.value)}
+                          placeholder={runtimePlatform === "win32" ? "powershell.exe" : "/bin/zsh"}
+                          maxLength={1000}
+                        />
+                      </div>
+                      <p>{runtimePlatform === "win32" ? t("terminal.windowsPathHelp") : t("terminal.pathHelp")}</p>
+                      <p>{runtimePlatform === "win32" ? t("terminal.windowsShellHelp") : t("terminal.shellPathHelp")}</p>
+                    </>
+                  )}
                 </div>
               )}
             </header>

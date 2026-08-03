@@ -1,9 +1,10 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { mkdir, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 import type { TerminalSettings } from "../shared/types.ts";
+import { isValidShellReference, normalizeRuntimePlatform } from "../shared/terminal.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -41,6 +42,8 @@ export type TerminalLaunch = {
   file: string;
   args: string[];
   artifact?: TerminalLaunchArtifact;
+  cwd?: string;
+  detached?: boolean;
 };
 
 const shellQuote = (value: string): string => {
@@ -84,9 +87,24 @@ const customLaunch = (
   shellPath: string,
   command: string,
   dataDir: string,
+  runtimePlatform: NodeJS.Platform,
+  cwd: string | null,
 ): TerminalLaunch => {
-  if (customPath === null || !isAbsolute(customPath)) {
+  const platform = normalizeRuntimePlatform(runtimePlatform);
+  const absoluteCustomPath = platform === "win32"
+    ? /^[A-Za-z]:[\\/]/.test(customPath ?? "") || /^\\\\/.test(customPath ?? "")
+    : customPath !== null && isAbsolute(customPath);
+  if (customPath === null || !absoluteCustomPath) {
     throw new Error("Custom terminal path must be absolute");
+  }
+  if (platform === "win32") {
+    const shellArgs = windowsShellArgs(shellPath, command);
+    return {
+      file: customPath,
+      args: ["-e", shellPath, ...shellArgs],
+      ...(cwd === null ? {} : { cwd }),
+      detached: true,
+    };
   }
   if (!customPath.toLocaleLowerCase().endsWith(".app")) {
     return { file: customPath, args: ["-e", shellPath, "-lic", command] };
@@ -104,6 +122,46 @@ const customLaunch = (
   };
 };
 
+const windowsShellArgs = (shellPath: string, command: string): string[] =>
+  /(^|[\\/])cmd(?:\.exe)?$/i.test(shellPath)
+    ? ["/K", command]
+    : ["-NoExit", "-Command", command];
+
+const windowsLaunch = (
+  settings: TerminalSettings,
+  command: string,
+  cwd: string | null,
+  dataDir: string,
+): TerminalLaunch => {
+  const shellArgs = windowsShellArgs(settings.shellPath, command);
+  if (settings.terminal === "windows-terminal") {
+    return {
+      file: "wt.exe",
+      args: [
+        "-w",
+        "0",
+        "new-tab",
+        ...(cwd === null ? [] : ["-d", cwd]),
+        settings.shellPath,
+        ...shellArgs,
+      ],
+      detached: true,
+    };
+  }
+  if (settings.terminal === "powershell" || settings.terminal === "cmd") {
+    return {
+      file: settings.shellPath,
+      args: shellArgs,
+      ...(cwd === null ? {} : { cwd }),
+      detached: true,
+    };
+  }
+  if (settings.terminal === "custom") {
+    return customLaunch(settings.customPath, settings.shellPath, command, dataDir, "win32", cwd);
+  }
+  throw new Error(`${settings.terminal} terminal launching is not supported on Windows`);
+};
+
 export const buildTerminalLaunch = (
   settings: TerminalSettings,
   command: string,
@@ -111,9 +169,13 @@ export const buildTerminalLaunch = (
   dataDir: string,
   runtimePlatform: NodeJS.Platform = process.platform,
 ): TerminalLaunch => {
-  if (!isAbsolute(settings.shellPath)) throw new Error("Shell path must be absolute");
+  const platform = normalizeRuntimePlatform(runtimePlatform);
+  if (!isValidShellReference(settings.shellPath, platform)) {
+    throw new Error(platform === "win32" ? "Invalid shell executable" : "Shell path must be absolute");
+  }
+  if (platform === "win32") return windowsLaunch(settings, command, cwd, dataDir);
   if (settings.terminal === "custom") {
-    return customLaunch(settings.customPath, settings.shellPath, command, dataDir);
+    return customLaunch(settings.customPath, settings.shellPath, command, dataDir, runtimePlatform, cwd);
   }
   if (runtimePlatform !== "darwin") {
     throw new Error(`${settings.terminal} terminal launching is only supported on macOS`);
@@ -137,7 +199,7 @@ export class TerminalLauncher {
 
   async launch(settings: TerminalSettings, command: string, cwd: string | null): Promise<void> {
     const launch = buildTerminalLaunch(settings, command, cwd, this.#dataDir);
-    await stat(settings.shellPath);
+    if (isAbsolute(settings.shellPath)) await stat(settings.shellPath);
     if (settings.terminal === "custom" && settings.customPath !== null) {
       await stat(settings.customPath);
     }
@@ -145,6 +207,38 @@ export class TerminalLauncher {
       await mkdir(join(this.#dataDir, "terminal-launches"), { recursive: true });
       await writeFile(launch.artifact.path, launch.artifact.content, { mode: launch.artifact.mode });
     }
+    if (launch.detached === true) {
+      try {
+        await spawnDetached(launch);
+      } catch (error) {
+        if (settings.terminal !== "windows-terminal" || !isMissingExecutable(error)) throw error;
+        await spawnDetached({
+          file: settings.shellPath,
+          args: windowsShellArgs(settings.shellPath, command),
+          ...(cwd === null ? {} : { cwd }),
+          detached: true,
+        });
+      }
+      return;
+    }
     await execFileAsync(launch.file, launch.args, { timeout: 15_000 });
   }
 }
+
+const isMissingExecutable = (error: unknown): boolean =>
+  typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
+
+const spawnDetached = (launch: TerminalLaunch): Promise<void> =>
+  new Promise((resolveSpawn, reject) => {
+    const child = spawn(launch.file, launch.args, {
+      ...(launch.cwd === undefined ? {} : { cwd: launch.cwd }),
+      detached: true,
+      stdio: "ignore",
+      windowsHide: false,
+    });
+    child.once("error", reject);
+    child.once("spawn", () => {
+      child.unref();
+      resolveSpawn();
+    });
+  });

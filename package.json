@@ -1,7 +1,7 @@
 {
   "name": "ai-session-search",
   "productName": "AI Session Search",
-  "version": "0.4.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Read-only local search for AI coding agent conversations.",
   "type": "module",
@@ -44,7 +44,6 @@
   },
   "devDependencies": {
     "@electron-forge/cli": "7.11.2",
-    "@electron-forge/maker-squirrel": "7.11.2",
     "@electron-forge/maker-zip": "7.11.2",
     "@types/node": "25.6.2",
     "@types/react": "19.2.14",

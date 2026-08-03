@@ -16,13 +16,15 @@ SQLite FTS5 trigram 索引搜索自然语言、代码、路径、错误信息和
 
 - macOS Apple Silicon：`darwin-arm64.zip`
 - macOS Intel：`darwin-x64.zip`
-- Windows x64：`AI-Session-Search-Setup.exe`
+- Windows x64 便携版：`AI.Session.Search-win32-x64-<version>.zip`
 
 客户端不需要安装 Node.js。启动后会立即显示界面，在后台扫描会话并展示索引进度；
 数据库存放在当前用户的系统应用数据目录，不包含开发者机器路径。
 
-当前发布包尚未签名，首次打开可能出现 Gatekeeper 或 SmartScreen 提示。“在终端中恢复”
-目前仅支持 macOS；Windows 支持完整搜索、阅读、分类和复制恢复命令。
+当前发布包尚未签名，首次打开可能出现 Gatekeeper 或 SmartScreen 提示。Windows 版本为
+便携版：解压 ZIP 后运行 `ai-session-search.exe`，无需安装。“在终端中恢复”支持 macOS
+和 Windows；Windows Terminal 会在最近使用的窗口中新建标签页，找不到 `wt.exe` 时回退
+到 PowerShell。
 
 ## 主要功能
 
@@ -31,6 +33,7 @@ SQLite FTS5 trigram 索引搜索自然语言、代码、路径、错误信息和
 - 收藏、重命名、收藏夹分类及对应筛选
 - 复制 Session ID 和可自定义的恢复命令
 - macOS 支持 Terminal、iTerm2、Warp 和自定义终端/Shell
+- Windows 支持 Windows Terminal、PowerShell、命令提示符和自定义可执行文件
 - 侧边栏可拖拽调整宽度，并记住用户设置
 - 后台增量索引和文件变化监听
 - 简体中文/英文界面自动切换；无需 API Key 或云端数据库
@@ -97,7 +100,8 @@ Codex:       cd {cwd} && codex resume {sessionId}
 
 `{cwd}` 和 `{sessionId}` 会从会话自动替换。也可以把模板设置为 `yolo`，复制结果会自动
 追加 Session ID。macOS 终端执行使用可配置的绝对 Shell 路径和 `-lic`，因此可以读取
-`~/.zshrc` 中的别名；iTerm2 会优先在当前窗口打开新 Tab。
+`~/.zshrc` 中的别名；iTerm2 会优先在当前窗口打开新 Tab。Windows 会按 PowerShell
+或命令提示符语法生成命令，并通过 `wt.exe -w 0 new-tab` 复用最近的终端窗口。
 
 ## 开发与发布
 

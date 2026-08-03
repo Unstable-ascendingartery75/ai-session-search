@@ -14,6 +14,12 @@ import { DEFAULT_RESUME_COMMAND_TEMPLATES } from "../shared/resumeCommand.ts";
 import { isProviderId } from "../shared/providers.ts";
 import { PROVIDER_IDS } from "../shared/types.ts";
 import { TERMINAL_IDS } from "../shared/types.ts";
+import {
+  defaultTerminalSettings,
+  isValidShellReference,
+  normalizeRuntimePlatform,
+  terminalIdsForPlatform,
+} from "../shared/terminal.ts";
 import type { SessionFile } from "./providers/types.ts";
 
 type SqlValue = string | number | bigint | Uint8Array | null;
@@ -609,28 +615,40 @@ export class SearchDatabase {
     return this.getResumeCommandTemplates();
   }
 
-  getTerminalSettings(): TerminalSettings {
+  getTerminalSettings(runtimePlatform: NodeJS.Platform = process.platform): TerminalSettings {
+    const platform = normalizeRuntimePlatform(runtimePlatform);
+    const defaults = defaultTerminalSettings(platform);
+    const availableTerminals = terminalIdsForPlatform(platform);
     const rows = this.#db
       .prepare("SELECT key, value FROM app_settings WHERE key IN ('terminal.kind', 'terminal.custom_path', 'terminal.shell_path')")
       .all() as SqlRow[];
     const values = new Map(rows.map((row) => [stringColumn(row, "key"), stringColumn(row, "value")]));
     const storedTerminal = values.get("terminal.kind");
-    const terminal = TERMINAL_IDS.includes(storedTerminal as TerminalSettings["terminal"])
+    const terminal = availableTerminals.includes(storedTerminal as TerminalSettings["terminal"])
       ? (storedTerminal as TerminalSettings["terminal"])
-      : "terminal";
+      : defaults.terminal;
     const customPath = values.get("terminal.custom_path")?.trim() || null;
     const environmentShell = process.env.SHELL?.trim();
-    const defaultShellPath =
-      environmentShell !== undefined && isAbsolute(environmentShell) ? environmentShell : "/bin/zsh";
+    const defaultShellPath = platform === "win32"
+      ? defaults.shellPath
+      : environmentShell !== undefined && isAbsolute(environmentShell)
+        ? environmentShell
+        : defaults.shellPath;
     const storedShellPath = values.get("terminal.shell_path")?.trim();
-    const shellPath = storedShellPath !== undefined && isAbsolute(storedShellPath)
+    const shellPath = storedShellPath !== undefined && isValidShellReference(storedShellPath, platform)
       ? storedShellPath
       : defaultShellPath;
     return { terminal, customPath, shellPath };
   }
 
-  updateTerminalSettings(settings: TerminalSettings): TerminalSettings {
-    if (!TERMINAL_IDS.includes(settings.terminal)) throw new Error("Unsupported terminal");
+  updateTerminalSettings(
+    settings: TerminalSettings,
+    runtimePlatform: NodeJS.Platform = process.platform,
+  ): TerminalSettings {
+    const platform = normalizeRuntimePlatform(runtimePlatform);
+    if (!TERMINAL_IDS.includes(settings.terminal) || !terminalIdsForPlatform(platform).includes(settings.terminal)) {
+      throw new Error("Unsupported terminal on this platform");
+    }
     const customPath = settings.customPath?.trim() || null;
     const shellPath = settings.shellPath.trim();
     if (customPath !== null && customPath.length > 1000) {
@@ -639,8 +657,8 @@ export class SearchDatabase {
     if (settings.terminal === "custom" && customPath === null) {
       throw new Error("Custom terminal path is required");
     }
-    if (!isAbsolute(shellPath) || shellPath.length > 1000) {
-      throw new Error("Shell path must be an absolute path with at most 1000 characters");
+    if (!isValidShellReference(shellPath, platform) || shellPath.length > 1000) {
+      throw new Error("Invalid shell executable");
     }
     const update = this.#db.prepare(`
       INSERT INTO app_settings(key, value, updated_at)

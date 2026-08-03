@@ -117,4 +117,57 @@ describe("buildTerminalLaunch", () => {
     expect(iterm.args.at(-1)).toMatch(/^\/bin\/bash -lic /);
     expect(custom.args).toEqual(["-e", "/bin/bash", "-lic", "resume-session"]);
   });
+
+  test("opens PowerShell in a new tab of the most recent Windows Terminal window", () => {
+    const launch = buildTerminalLaunch(
+      { terminal: "windows-terminal", customPath: null, shellPath: "powershell.exe" },
+      "Set-Location -LiteralPath 'C:\\Workspace\\Demo'; yolo session-1",
+      "C:\\Workspace\\Demo",
+      "C:\\Users\\Alice\\AppData\\Roaming\\AI Session Search",
+      "win32",
+    );
+
+    expect(launch.file).toBe("wt.exe");
+    expect(launch.args).toEqual([
+      "-w",
+      "0",
+      "new-tab",
+      "-d",
+      "C:\\Workspace\\Demo",
+      "powershell.exe",
+      "-NoExit",
+      "-Command",
+      "Set-Location -LiteralPath 'C:\\Workspace\\Demo'; yolo session-1",
+    ]);
+  });
+
+  test("can open standalone PowerShell and Command Prompt windows", () => {
+    const powershell = buildTerminalLaunch(
+      { terminal: "powershell", customPath: null, shellPath: "pwsh.exe" },
+      "yolo session-1",
+      "C:\\Workspace",
+      "C:\\AppData",
+      "win32",
+    );
+    const commandPrompt = buildTerminalLaunch(
+      { terminal: "cmd", customPath: null, shellPath: "cmd.exe" },
+      "yolo session-1",
+      "C:\\Workspace",
+      "C:\\AppData",
+      "win32",
+    );
+
+    expect(powershell).toMatchObject({
+      file: "pwsh.exe",
+      args: ["-NoExit", "-Command", "yolo session-1"],
+      cwd: "C:\\Workspace",
+      detached: true,
+    });
+    expect(commandPrompt).toMatchObject({
+      file: "cmd.exe",
+      args: ["/K", "yolo session-1"],
+      cwd: "C:\\Workspace",
+      detached: true,
+    });
+  });
 });

@@ -6,6 +6,7 @@ import { z } from "zod";
 import { TERMINAL_IDS, type ProviderId } from "../shared/types.ts";
 import { isProviderId, PROVIDER_DESCRIPTORS } from "../shared/providers.ts";
 import { renderResumeCommand } from "../shared/resumeCommand.ts";
+import { commandDialectForTerminal, normalizeRuntimePlatform } from "../shared/terminal.ts";
 import type { AppConfig } from "./config.ts";
 import { SearchDatabase } from "./database.ts";
 import { SessionIndexer } from "./indexer.ts";
@@ -86,6 +87,7 @@ export const createApp = (options: {
       counts: database.countSessions(),
       watch: config.watch,
       sync: indexer.syncProgress(),
+      runtimePlatform: normalizeRuntimePlatform(process.platform),
     }),
   );
 
@@ -117,13 +119,18 @@ export const createApp = (options: {
     if (template === undefined) {
       return context.json({ error: "Resume command is unavailable for this provider" }, 400);
     }
+    const terminalSettings = database.getTerminalSettings();
     const command = renderResumeCommand(template, {
       sessionId: result.session.sourceSessionId,
       cwd: result.session.projectPath,
-    });
+    }, commandDialectForTerminal(
+      terminalSettings.terminal,
+      normalizeRuntimePlatform(process.platform),
+      terminalSettings.shellPath,
+    ));
     try {
       await terminalLauncher.launch(
-        database.getTerminalSettings(),
+        terminalSettings,
         command,
         result.session.projectPath,
       );

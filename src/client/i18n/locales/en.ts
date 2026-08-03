@@ -48,11 +48,17 @@ export const messages = {
     "Supports {cwd} and {sessionId}. You can also enter only yolo; the Session ID will be appended automatically.",
   "terminal.type": "Terminal application",
   "terminal.custom": "Custom path",
+  "terminal.commandPrompt": "Command Prompt",
   "terminal.shellPath": "Shell path",
+  "terminal.shellExecutable": "Shell executable",
   "terminal.pathHelp":
     "Custom paths must be absolute, for example /Applications/Ghostty.app or an executable that supports -e.",
   "terminal.shellPathHelp":
     "The shell path must be absolute and support -lic, for example /bin/zsh or /bin/bash. Interactive startup files provide aliases such as yolo.",
+  "terminal.windowsPathHelp":
+    "Windows Terminal opens a new tab in the most recent window. A custom terminal path must be absolute and support -e.",
+  "terminal.windowsShellHelp":
+    "Use powershell.exe, pwsh.exe, cmd.exe, or an absolute executable path. PowerShell profiles remain available for aliases such as yolo.",
   "message.you": "You",
   "message.phase.commentary": "Commentary",
   "message.phase.finalAnswer": "Final answer",

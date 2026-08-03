@@ -50,11 +50,17 @@ export const messages: Record<MessageId, string> = {
     "支持 {cwd} 和 {sessionId}；只输入 yolo 也可以，会自动追加 Session ID。",
   "terminal.type": "终端应用",
   "terminal.custom": "自定义路径",
+  "terminal.commandPrompt": "命令提示符",
   "terminal.shellPath": "Shell 路径",
+  "terminal.shellExecutable": "Shell 可执行文件",
   "terminal.pathHelp":
     "自定义路径必须是绝对路径，例如 /Applications/Ghostty.app，或支持 -e 参数的终端可执行文件。",
   "terminal.shellPathHelp":
     "Shell 路径必须是绝对路径并支持 -lic，例如 /bin/zsh 或 /bin/bash；交互式启动文件可提供 yolo 等别名。",
+  "terminal.windowsPathHelp":
+    "Windows Terminal 会在最近使用的窗口中新建标签页；自定义终端路径必须是绝对路径并支持 -e。",
+  "terminal.windowsShellHelp":
+    "可使用 powershell.exe、pwsh.exe、cmd.exe 或绝对可执行文件路径；PowerShell 配置文件中的 yolo 等别名仍然可用。",
   "message.you": "你",
   "message.phase.commentary": "过程",
   "message.phase.finalAnswer": "最终回答",

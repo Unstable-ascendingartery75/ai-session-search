@@ -230,6 +230,27 @@ describe("SearchDatabase", () => {
     });
   });
 
+  test("uses Windows Terminal and PATH-resolved PowerShell defaults on Windows", async () => {
+    const database = await createDatabase();
+
+    expect(database.getTerminalSettings("win32")).toEqual({
+      terminal: "windows-terminal",
+      customPath: null,
+      shellPath: "powershell.exe",
+    });
+    expect(
+      database.updateTerminalSettings(
+        { terminal: "powershell", customPath: null, shellPath: "pwsh.exe" },
+        "win32",
+      ),
+    ).toEqual({ terminal: "powershell", customPath: null, shellPath: "pwsh.exe" });
+    expect(database.getTerminalSettings("win32")).toEqual({
+      terminal: "powershell",
+      customPath: null,
+      shellPath: "pwsh.exe",
+    });
+  });
+
   test("migrates the two-provider constraint and indexes a new provider", async () => {
     const directory = await mkdtemp(join(tmpdir(), "ai-session-search-provider-migration-"));
     const path = join(directory, "search.db");

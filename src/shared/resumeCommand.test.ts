@@ -28,4 +28,24 @@ describe("renderResumeCommand", () => {
       }),
     ).toBe("cd '/workspace/My Project' && claude --resume session-1");
   });
+
+  test("renders a PowerShell-compatible resume command on Windows", () => {
+    expect(
+      renderResumeCommand(
+        "cd {cwd} && codex resume {sessionId}",
+        { sessionId: "session-1", cwd: "C:\\Users\\Alice\\My Project" },
+        "powershell",
+      ),
+    ).toBe("Set-Location -LiteralPath 'C:\\Users\\Alice\\My Project'; codex resume session-1");
+  });
+
+  test("renders a Command Prompt-compatible resume command on Windows", () => {
+    expect(
+      renderResumeCommand(
+        "cd {cwd} && codex resume {sessionId}",
+        { sessionId: "session-1", cwd: "C:\\Users\\Alice\\My Project" },
+        "cmd",
+      ),
+    ).toBe('cd /d "C:\\Users\\Alice\\My Project" && codex resume session-1');
+  });
 });
