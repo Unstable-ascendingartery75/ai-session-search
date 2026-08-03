@@ -10,13 +10,26 @@ body { margin: 0; min-width: 320px; min-height: 100vh; }
 button, input, select { font: inherit; }
 button { color: inherit; }
 
-.app-shell { display: grid; grid-template-columns: minmax(340px, 28vw) 1fr; height: 100vh; overflow: hidden; }
-.sidebar { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; background: #fbfaf6; border-right: 1px solid #dedbd2; }
+.app-shell { display: grid; grid-template-columns: var(--sidebar-width, 390px) 7px minmax(0, 1fr); height: 100vh; overflow: hidden; }
+.sidebar { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; background: #fbfaf6; }
 .brand { display: flex; align-items: center; gap: 12px; padding: 22px 20px 14px; }
 .brand-mark, .welcome-icon { display: grid; place-items: center; color: white; background: #176b55; border-radius: 13px; font-size: 26px; }
 .brand-mark { width: 42px; height: 42px; }
 .brand h1 { font-size: 17px; margin: 0; letter-spacing: -.02em; }
 .brand p { margin: 3px 0 0; color: #7a7d77; font-size: 12px; }
+.github-link { display: grid; place-items: center; width: 34px; height: 34px; margin-left: auto; color: #656a65; border: 1px solid #dedbd2; border-radius: 9px; background: #fff; transition: color .15s ease, border-color .15s ease, background .15s ease; }
+.github-link:hover { color: #176b55; border-color: #8aa99e; background: #f2f7f5; }
+.github-link:focus-visible { outline: 3px solid #cfe3dc; outline-offset: 2px; }
+.github-link svg { width: 19px; height: 19px; fill: currentColor; }
+
+.indexing-status { margin: 2px 16px 8px; padding: 11px 12px; color: #3b5b51; border: 1px solid #cfe0da; border-radius: 10px; background: #edf5f2; }
+.indexing-status-copy { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.indexing-status-copy strong { font-size: 12px; }
+.indexing-status-copy span, .indexing-status small { overflow: hidden; color: #6c7b76; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+.indexing-status progress { display: block; width: 100%; height: 5px; margin: 8px 0 6px; overflow: hidden; border: 0; border-radius: 99px; background: #d5e4df; appearance: none; }
+.indexing-status progress::-webkit-progress-bar { background: #d5e4df; }
+.indexing-status progress::-webkit-progress-value { background: #2d826a; transition: width .25s ease; }
+.indexing-status progress::-moz-progress-bar { background: #2d826a; }
 
 .search-box { display: flex; align-items: center; gap: 8px; margin: 8px 16px; padding: 0 12px; background: #efede6; border: 1px solid transparent; border-radius: 10px; }
 .search-box:focus-within { border-color: #4e8c7a; box-shadow: 0 0 0 3px #dbe9e3; background: white; }
@@ -52,6 +65,12 @@ button { color: inherit; }
 .empty-state { padding: 48px 12px; color: #888; text-align: center; font-size: 13px; }
 .sidebar-footer { display: flex; align-items: center; gap: 12px; padding: 10px 16px; overflow-x: auto; border-top: 1px solid #e5e2da; color: #777; font-size: 11px; white-space: nowrap; }
 .sidebar-footer button { margin-left: auto; border: 0; background: transparent; cursor: pointer; color: #176b55; }
+.sidebar-footer button:disabled { color: #9aa39f; cursor: wait; }
+
+.sidebar-resizer { position: relative; z-index: 5; min-width: 7px; cursor: col-resize; touch-action: none; background: #dedbd2; outline: 0; }
+.sidebar-resizer::after { position: absolute; top: 0; bottom: 0; left: 2px; width: 3px; content: ""; background: transparent; transition: background .15s ease; }
+.sidebar-resizer:hover::after, .sidebar-resizer:focus-visible::after, .resizing-sidebar .sidebar-resizer::after { background: #4e8c7a; }
+.resizing-sidebar { cursor: col-resize; user-select: none; }
 
 .conversation-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; background: #f7f5ef; }
 .welcome { display: grid; place-items: center; align-content: center; height: 100%; padding: 28px; text-align: center; }
@@ -115,6 +134,7 @@ button { color: inherit; }
 @media (max-width: 780px) {
   .app-shell { grid-template-columns: 1fr; }
   .conversation-pane { display: none; }
+  .sidebar-resizer { display: none; }
   .sidebar { border-right: 0; }
 }
 

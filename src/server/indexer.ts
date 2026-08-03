@@ -1,5 +1,5 @@
 import { watch, type FSWatcher } from "node:fs";
-import type { ProviderId, ProviderStatus } from "../shared/types.ts";
+import type { ProviderId, ProviderStatus, SyncProgress } from "../shared/types.ts";
 import { SearchDatabase } from "./database.ts";
 import { pathExists } from "./providers/files.ts";
 import type { ConversationProvider } from "./providers/types.ts";
@@ -19,10 +19,25 @@ export class SessionIndexer {
   readonly #watchers: FSWatcher[] = [];
   readonly #debounceTimers = new Map<ProviderId, NodeJS.Timeout>();
   #syncQueue: Promise<unknown> = Promise.resolve();
+  #syncAllPromise: Promise<SyncResult[]> | null = null;
+  #closed = false;
+  #syncProgress: SyncProgress;
 
   constructor(database: SearchDatabase, providers: ConversationProvider[]) {
     this.#database = database;
     this.#providers = providers;
+    this.#syncProgress = {
+      running: false,
+      currentProvider: null,
+      completedProviders: 0,
+      totalProviders: providers.length,
+      processedFiles: 0,
+      totalFiles: 0,
+    };
+  }
+
+  syncProgress(): SyncProgress {
+    return { ...this.#syncProgress };
   }
 
   async status(): Promise<ProviderStatus[]> {
@@ -40,46 +55,100 @@ export class SessionIndexer {
     );
   }
 
-  async syncAll(): Promise<SyncResult[]> {
-    const results: SyncResult[] = [];
-    for (const provider of this.#providers) results.push(await this.syncProvider(provider.id));
-    return results;
+  syncAll(): Promise<SyncResult[]> {
+    if (this.#syncAllPromise !== null) return this.#syncAllPromise;
+    const operation = this.#runSyncAll();
+    this.#syncAllPromise = operation;
+    const clearOperation = (): void => {
+      if (this.#syncAllPromise === operation) this.#syncAllPromise = null;
+    };
+    void operation.then(clearOperation, clearOperation);
+    return operation;
   }
 
-  async syncProvider(providerId: ProviderId): Promise<SyncResult> {
+  async #runSyncAll(): Promise<SyncResult[]> {
+    const results: SyncResult[] = [];
+    this.#syncProgress = {
+      running: true,
+      currentProvider: this.#providers[0]?.id ?? null,
+      completedProviders: 0,
+      totalProviders: this.#providers.length,
+      processedFiles: 0,
+      totalFiles: 0,
+    };
+    try {
+      for (const provider of this.#providers) {
+        if (this.#closed) break;
+        this.#syncProgress = {
+          ...this.#syncProgress,
+          currentProvider: provider.id,
+          processedFiles: 0,
+          totalFiles: 0,
+        };
+        results.push(await this.syncProvider(provider.id, (processedFiles, totalFiles) => {
+          this.#syncProgress = { ...this.#syncProgress, processedFiles, totalFiles };
+        }));
+        this.#syncProgress = {
+          ...this.#syncProgress,
+          completedProviders: this.#syncProgress.completedProviders + 1,
+        };
+      }
+      return results;
+    } finally {
+      this.#syncProgress = {
+        ...this.#syncProgress,
+        running: false,
+        currentProvider: null,
+        processedFiles: 0,
+        totalFiles: 0,
+      };
+    }
+  }
+
+  async syncProvider(
+    providerId: ProviderId,
+    onProgress?: (processedFiles: number, totalFiles: number) => void,
+  ): Promise<SyncResult> {
     const provider = this.#providers.find((candidate) => candidate.id === providerId);
     if (provider === undefined) throw new Error(`Provider is not enabled: ${providerId}`);
 
     const detected = (await Promise.all(provider.sessionRoots.map(pathExists))).some(Boolean);
     if (!detected) {
+      onProgress?.(0, 0);
       return { provider: providerId, discovered: 0, indexed: 0, unchanged: 0, removed: 0, errors: 0 };
     }
 
     const files = await provider.discover();
+    onProgress?.(0, files.length);
     const visibleFiles = new Set(files.map((file) => file.path));
     let indexed = 0;
     let unchanged = 0;
     let errors = 0;
 
+    let processed = 0;
     for (const file of files) {
-      const existing = this.#database.getIndexedFile(file.path);
-      if (
-        existing !== null &&
-        Math.trunc(existing.mtimeMs) === Math.trunc(file.mtimeMs) &&
-        existing.size === file.size
-      ) {
-        unchanged += 1;
-        continue;
-      }
-
+      if (this.#closed) break;
       try {
-        const session = await provider.parse(file);
-        if (session === null) continue;
-        this.#database.upsertSession(session, file);
-        indexed += 1;
+        const existing = this.#database.getIndexedFile(file.path);
+        if (
+          existing !== null &&
+          Math.trunc(existing.mtimeMs) === Math.trunc(file.mtimeMs) &&
+          existing.size === file.size
+        ) {
+          unchanged += 1;
+        } else {
+          const session = await provider.parse(file);
+          if (session !== null) {
+            this.#database.upsertSession(session, file);
+            indexed += 1;
+          }
+        }
       } catch (error) {
         errors += 1;
         process.stderr.write(`[${provider.id}] Failed to index ${file.path}: ${String(error)}\n`);
+      } finally {
+        processed += 1;
+        onProgress?.(processed, files.length);
       }
     }
 
@@ -88,6 +157,7 @@ export class SessionIndexer {
   }
 
   async startWatching(): Promise<void> {
+    if (this.#closed) return;
     for (const provider of this.#providers) {
       for (const root of provider.sessionRoots) {
         if (!(await pathExists(root))) continue;
@@ -119,6 +189,7 @@ export class SessionIndexer {
   }
 
   close(): void {
+    this.#closed = true;
     for (const timer of this.#debounceTimers.values()) clearTimeout(timer);
     this.#debounceTimers.clear();
     for (const watcher of this.#watchers) watcher.close();

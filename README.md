@@ -5,121 +5,45 @@ English | [简体中文](./README.zh-CN.md)
 [![GitHub Release](https://img.shields.io/github/v/release/lililib/ai-session-search)](https://github.com/lililib/ai-session-search/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
-A local-first, read-only search and viewer for AI coding sessions. It automatically discovers
-conversations from eleven supported coding agents and indexes them with SQLite FTS5 trigram search, making it
-easy to find natural language, code identifiers, file paths, and error messages.
+A local-first, read-only search app for AI coding sessions. It discovers local conversations from
+11 coding tools and uses SQLite FTS5 trigram indexing to search natural language, code, paths,
+errors, and Session IDs.
 
 ![AI Session Search interface](./docs/images/ai-session-search.png)
 
 ## Desktop clients
 
-macOS application ZIPs (Apple Silicon and Intel) and a Windows x64 `Setup.exe` are published on
-[GitHub Releases](https://github.com/lililib/ai-session-search/releases). The desktop client does
-not require Node.js. It starts the bundled service on a random loopback port and automatically
-discovers sessions belonging to the current user. Its database is stored in the operating
-system's application-data directory for AI Session Search and never depends on a developer's
-machine-specific paths.
+Download from [GitHub Releases](https://github.com/lililib/ai-session-search/releases):
 
-The current packages are not signed with an Apple Developer ID or Windows Authenticode
-certificate, so Gatekeeper or Microsoft Defender SmartScreen may show a warning on first launch.
-**Open in terminal** is currently available only on macOS. The Windows client still supports
-search, reading, collections, renaming, and copying Session IDs or resume commands.
+- macOS Apple Silicon: `darwin-arm64.zip`
+- macOS Intel: `darwin-x64.zip`
+- Windows x64: `AI-Session-Search-Setup.exe`
 
-Run the desktop client from source or make a package for the current platform:
+The desktop client requires no Node.js installation. It displays the interface immediately, scans
+sessions in the background, and reports indexing progress. Its database uses the current user's
+system application-data directory and contains no developer-specific paths.
 
-```bash
-corepack pnpm desktop:start
-corepack pnpm desktop:make
-```
+Current packages are unsigned, so Gatekeeper or SmartScreen may show a first-launch warning.
+**Open in terminal** currently supports macOS only; Windows provides full search, reading,
+organization, and resume-command copying.
 
-Artifacts are written to `out/make/`. Pushing a `v*` tag runs GitHub Actions for macOS arm64,
-macOS x64, and Windows x64, then attaches the artifacts to the matching GitHub Release.
+## Highlights
 
-## Features
+- Searches across providers, projects, message content, custom titles, and full/partial Session IDs
+- SQLite FTS5 trigram indexing for Chinese, Japanese, Korean, English, and code substrings
+- Favorites, custom titles, collections, and matching filters
+- Copies Session IDs and customizable resume commands
+- macOS integration with Terminal, iTerm2, Warp, and custom terminal/shell paths
+- Resizable sidebar with persisted width
+- Background incremental indexing and filesystem watching
+- Automatic English/Simplified Chinese UI; no API key or cloud database required
 
-- Automatically discovers Claude Code, Codex, Antigravity, OpenCode, Hermes, GitHub Copilot CLI, Droid, OpenClaw, Cursor, Pi, and Kimi Code sessions
-- Searches across all providers or filters by provider and project
-- Full-text search powered by SQLite FTS5 trigram indexing
-- Substring fallback for two-character Chinese queries
-- Read-only conversation viewer with matched-message navigation
-- Custom session titles
-- Favorite and renamed-session filters
-- Searches message content, custom titles, and full or partial session IDs
-- Creates, renames, and deletes local collections
-- Organizes sessions into collections or filters uncategorized sessions
-- Copies Session IDs and resume commands
-- Supports provider-specific custom resume command templates
-- Opens resume commands in Terminal, iTerm2, Warp, or a custom terminal path
-- Automatically selects English or Simplified Chinese from browser language preferences
-- Reindexes sessions automatically when source files change
-- Requires no Anthropic API, OpenAI API, or cloud database
+AI Session Search never modifies source conversations. Titles, collections, settings, and indexes
+are written only to its own SQLite database.
 
-AI Session Search never modifies source session files. Custom titles, favorites,
-collections, settings, and the search index are stored only in the application's own SQLite
-database.
+## Supported clients
 
-## Copy and resume commands
-
-Open a session to copy its Session ID or a complete resume command. Built-in templates are available for Claude Code, Codex, Antigravity, OpenCode, Hermes, Copilot CLI, Cursor, Pi, and Kimi Code. For example:
-
-```text
-Claude Code: cd {cwd} && claude --resume {sessionId}
-Codex:       cd {cwd} && codex resume {sessionId}
-```
-
-`{cwd}` is replaced with the project directory recorded by the session, and `{sessionId}` is
-replaced with the source Session ID. Templates are stored separately for each provider in the
-application database. A custom prefix such as `yolo` is also valid and produces
-`yolo <session-id>`.
-
-On macOS, **Open in terminal** can execute the rendered resume command in Terminal, iTerm2,
-Warp, or a custom absolute application/executable path. Custom `.app` paths are opened with an
-application-owned `.command` file; custom executables are invoked using `-e /bin/zsh -lic`.
-All terminal commands run through the configured interactive login shell so aliases from its
-startup files, such as `yolo`, are available. The shell path defaults to the server process's
-`$SHELL` when it is an absolute path, otherwise `/bin/zsh`. Custom shells must support `-lic`;
-common choices include `/bin/zsh` and `/bin/bash`.
-When iTerm2 already has a window, AI Session Search opens the resume command in a new tab of
-the current window; it creates a window only when none exists.
-Terminal launching is enabled only while the server is bound to `localhost`, `127.0.0.1`, or
-`::1`.
-
-## Automatic discovery and configuration
-
-Paths are resolved using the following precedence:
-
-| Data | CLI option | Application environment | Native environment | Default |
-| --- | --- | --- | --- | --- |
-| Claude Code | `--claude-dir` | `AI_SESSION_CLAUDE_HOME` | `CLAUDE_CONFIG_DIR` | `~/.claude` |
-| Codex | `--codex-dir` | `AI_SESSION_CODEX_HOME` | `CODEX_HOME` | `~/.codex` |
-| Other providers | `--provider-dir provider=path` | `AI_SESSION_<PROVIDER>_HOME` | Provider-specific when available | See the table below |
-| Application data | `--data-dir` | `AI_SESSION_DATA_DIR` | `XDG_DATA_HOME` | Platform application data directory |
-
-### Command-line options
-
-Command-line options take precedence over environment variables.
-
-| Option | Environment variable | Default | Description |
-| --- | --- | --- | --- |
-| `-p, --port <port>` | `PORT` | `3411` | Port used by the web server |
-| `-h, --hostname <hostname>` | `HOSTNAME` | `localhost` | Hostname or network interface to listen on |
-| `--claude-dir <path>` | `AI_SESSION_CLAUDE_HOME`, then `CLAUDE_CONFIG_DIR` | `~/.claude` | Claude Code home directory |
-| `--codex-dir <path>` | `AI_SESSION_CODEX_HOME`, then `CODEX_HOME` | `~/.codex` | Codex home directory |
-| `--provider-dir <provider=path>` | Provider-specific | Provider-specific | Override a provider home; may be repeated |
-| `--data-dir <path>` | `AI_SESSION_DATA_DIR`, then `XDG_DATA_HOME` | Platform application data directory | Application database directory |
-| `--providers <providers>` | `AI_SESSION_PROVIDERS` | `auto` | `auto` or a comma-separated provider list |
-| `--no-watch` | — | Watching enabled | Disable automatic reindexing when session files change |
-| `--help` | — | — | Display CLI help |
-
-Example:
-
-```bash
-corepack pnpm start --hostname 127.0.0.1 --port 8080
-```
-
-Supported provider IDs and default homes:
-
-| Provider ID | Client | Default home |
+| ID | Client | Default home |
 | --- | --- | --- |
 | `claude` | Claude Code | `~/.claude` |
 | `codex` | Codex | `~/.codex` |
@@ -133,95 +57,74 @@ Supported provider IDs and default homes:
 | `pi` | Pi | `~/.pi` |
 | `kimi` | Kimi Code | `~/.kimi-code` |
 
-For example, `--provider-dir kimi=/custom/kimi --provider-dir pi=/custom/pi` overrides two homes without hardcoding a user directory. Only providers selected by `--providers` are scanned; `auto` enables automatic detection for all registered providers.
+Path precedence is: CLI option → `AI_SESSION_*` environment variable → client-native environment
+variable → platform default. User home paths are never hardcoded.
 
-Claude Code discovery:
+## CLI / Web version
 
-```text
-<claude-home>/projects/**/*.jsonl
-```
-
-Codex discovery:
-
-```text
-<codex-home>/sessions/**/*.jsonl
-<codex-home>/archived_sessions/**/*.jsonl
-```
-
-`history.jsonl` and `session_index.jsonl` are not used as session discovery sources. Codex
-`session_index.jsonl` is used only to enrich titles for sessions that were already discovered.
-
-## Internationalization
-
-The interface uses Lingui and automatically selects a locale from browser language preferences:
-
-- `zh-*`: Simplified Chinese
-- `en-*`: English
-- Any other language: English fallback
-
-Locale detection and translation catalogs live in `src/client/i18n/`. To add a language, create
-its catalog and register its language-tag mapping in `localeDetection.ts`.
-
-## Local development
-
-Requirements:
-
-- Node.js 24 or later, for the built-in `node:sqlite` module
-- pnpm 11
+Requires Node.js 24+ and pnpm 11:
 
 ```bash
 corepack pnpm install
-corepack pnpm dev
-```
-
-Development servers:
-
-- Frontend: http://localhost:3410
-- Backend: http://localhost:3411
-
-Production build:
-
-```bash
 corepack pnpm build
 corepack pnpm start
 ```
 
-Enable only Codex and provide custom directories:
+The default URL is `http://localhost:3411`.
+
+| Option | Environment | Default |
+| --- | --- | --- |
+| `-p, --port <port>` | `PORT` | `3411` |
+| `-h, --hostname <hostname>` | `HOSTNAME` | `localhost` |
+| `--claude-dir <path>` | `AI_SESSION_CLAUDE_HOME` / `CLAUDE_CONFIG_DIR` | `~/.claude` |
+| `--codex-dir <path>` | `AI_SESSION_CODEX_HOME` / `CODEX_HOME` | `~/.codex` |
+| `--provider-dir <provider=path>` | `AI_SESSION_<PROVIDER>_HOME` | Provider default |
+| `--data-dir <path>` | `AI_SESSION_DATA_DIR` / `XDG_DATA_HOME` | Platform app data |
+| `--providers <ids>` | `AI_SESSION_PROVIDERS` | `auto` |
+| `--no-watch` | — | Watching enabled |
+
+Examples:
 
 ```bash
-corepack pnpm start \
-  --providers codex \
-  --codex-dir /path/to/codex-home \
-  --data-dir /path/to/app-data
+corepack pnpm start --providers codex --codex-dir /path/to/codex-home
+corepack pnpm start --provider-dir kimi=/custom/kimi --provider-dir pi=/custom/pi
 ```
 
-Disable file watching:
+## Resume commands
 
-```bash
-corepack pnpm start --no-watch
+Built-in templates include:
+
+```text
+Claude Code: cd {cwd} && claude --resume {sessionId}
+Codex:       cd {cwd} && codex resume {sessionId}
 ```
 
-## Validation
+`{cwd}` and `{sessionId}` are replaced from the session. A template containing only `yolo`
+automatically receives the Session ID. macOS terminal execution uses a configurable absolute shell
+path with `-lic`, so aliases from files such as `~/.zshrc` are available. iTerm2 opens a tab in the
+current window when possible.
+
+## Development and releases
 
 ```bash
+corepack pnpm dev             # Web development
+corepack pnpm desktop:start   # Run Electron
+corepack pnpm desktop:make    # Package the current platform
 corepack pnpm test
 corepack pnpm typecheck
 corepack pnpm build
 ```
 
-## Privacy boundaries
+Pushing a `v*` tag builds macOS arm64, macOS x64, and Windows x64 in GitHub Actions and attaches the
+artifacts to a GitHub Release.
 
-- The index stays entirely on the local device.
-- The application does not read `auth.json`, API keys, or login credentials.
-- It executes a rendered resume command only after the user clicks **Open in terminal**; this
-  endpoint is disabled for non-loopback listeners.
-- It never executes commands or tool calls found in session content.
-- Add authentication and network access controls before exposing the service remotely. By
-  default, it listens only on `localhost`.
+## Privacy and license
 
-## Upstream and license
+- Does not read `auth.json`, API keys, or login credentials.
+- Never executes commands or tool calls found in session content.
+- Terminal resume runs only after a user click and requires a loopback listener.
+- Add authentication and network controls before exposing the Web service remotely.
 
 The search architecture is inspired by and adapted from
-[d-kimuson/claude-code-viewer](https://github.com/d-kimuson/claude-code-viewer), which is licensed
-under the MIT License. See [NOTICE.md](./NOTICE.md) for attribution. This project is also licensed
-under the MIT License.
+[d-kimuson/claude-code-viewer](https://github.com/d-kimuson/claude-code-viewer). See
+[NOTICE.md](./NOTICE.md). Licensed under the [MIT License](./LICENSE).

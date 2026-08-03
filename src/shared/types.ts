@@ -92,3 +92,12 @@ export type ProviderStatus = {
   detected: boolean;
   sessionRoots: string[];
 };
+
+export type SyncProgress = {
+  running: boolean;
+  currentProvider: ProviderId | null;
+  completedProviders: number;
+  totalProviders: number;
+  processedFiles: number;
+  totalFiles: number;
+};

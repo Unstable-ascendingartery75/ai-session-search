@@ -5,114 +5,41 @@
 [![GitHub Release](https://img.shields.io/github/v/release/lililib/ai-session-search)](https://github.com/lililib/ai-session-search/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
-一个本地优先、只读的 AI 编程会话搜索与阅读器。自动发现 11 种 AI 编程工具的
-会话，使用 SQLite FTS5 trigram 索引，适合搜索中文、代码标识符、文件路径和错误信息。
+本地优先、只读的 AI 编程会话搜索器。自动发现 11 种编程工具的本地会话，并使用
+SQLite FTS5 trigram 索引搜索自然语言、代码、路径、错误信息和 Session ID。
 
 ![AI Session Search 界面](./docs/images/ai-session-search.png)
 
 ## 桌面客户端
 
-macOS（Apple Silicon、Intel）`.zip` 应用包和 Windows x64 `Setup.exe` 会发布在
-[GitHub Releases](https://github.com/lililib/ai-session-search/releases)。桌面客户端无需安装
-Node.js：打开后会在随机的本机回环端口启动内置服务，并自动扫描当前用户的会话目录。
-应用数据库存放在操作系统分配给 AI Session Search 的应用数据目录，不依赖开发者机器上的路径。
+从 [GitHub Releases](https://github.com/lililib/ai-session-search/releases) 下载：
 
-当前发布包未进行 Apple Developer ID 或 Windows Authenticode 签名，因此首次打开时可能出现
-Gatekeeper 或 Microsoft Defender SmartScreen 提示。“在终端中恢复”目前只支持 macOS；Windows
-客户端仍然支持搜索、阅读、收藏夹、重命名以及复制 Session ID/恢复命令。
+- macOS Apple Silicon：`darwin-arm64.zip`
+- macOS Intel：`darwin-x64.zip`
+- Windows x64：`AI-Session-Search-Setup.exe`
 
-从源码启动或生成当前平台安装包：
+客户端不需要安装 Node.js。启动后会立即显示界面，在后台扫描会话并展示索引进度；
+数据库存放在当前用户的系统应用数据目录，不包含开发者机器路径。
 
-```bash
-corepack pnpm desktop:start
-corepack pnpm desktop:make
-```
+当前发布包尚未签名，首次打开可能出现 Gatekeeper 或 SmartScreen 提示。“在终端中恢复”
+目前仅支持 macOS；Windows 支持完整搜索、阅读、分类和复制恢复命令。
 
-生成结果位于 `out/make/`。推送 `v*` 标签后，GitHub Actions 会分别构建 macOS arm64、
-macOS x64 和 Windows x64，并把文件加入对应的 GitHub Release。
+## 主要功能
 
-## 功能
+- 跨来源、项目、消息内容、自定义名称和完整/部分 Session ID 搜索
+- SQLite FTS5 trigram 全文索引，支持中文、日文、韩文、英文和代码子串
+- 收藏、重命名、收藏夹分类及对应筛选
+- 复制 Session ID 和可自定义的恢复命令
+- macOS 支持 Terminal、iTerm2、Warp 和自定义终端/Shell
+- 侧边栏可拖拽调整宽度，并记住用户设置
+- 后台增量索引和文件变化监听
+- 简体中文/英文界面自动切换；无需 API Key 或云端数据库
 
-- 自动发现 Claude Code、Codex、Antigravity、OpenCode、Hermes、GitHub Copilot CLI、Droid、OpenClaw、Cursor、Pi 与 Kimi Code 会话
-- 搜索全部来源、指定来源或指定项目
-- SQLite FTS5 trigram 全文搜索
-- 两字中文查询自动使用子串搜索兜底
-- 只读会话详情与命中消息定位
-- 自定义会话名称
-- 收藏或取消收藏会话
-- 筛选所有已重命名的会话
-- 搜索消息内容、自定义名称以及完整或部分 Session ID
-- 创建、重命名和删除本地收藏夹
-- 将会话移动到收藏夹，或筛选尚未分类的会话
-- 一键复制 Session ID 或恢复命令
-- 按来源分别自定义恢复命令模板
-- 在 Terminal、iTerm2、Warp 或自定义终端路径中执行恢复命令
-- 根据浏览器与系统首选语言自动切换简体中文或英文界面
-- 文件变化后自动重新索引
-- 不需要 Anthropic API、OpenAI API 或云端数据库
+本项目不会修改任何来源会话。名称、收藏夹、设置和索引只写入自己的 SQLite 数据库。
 
-本项目不会修改任何来源的会话文件。自定义名称、收藏状态和搜索索引
-仅写入自己的 SQLite 数据库。
+## 支持的客户端
 
-## 复制与恢复命令
-
-打开会话后可以直接复制 Session ID，或复制完整恢复命令。Claude Code、Codex、Antigravity、OpenCode、Hermes、Copilot CLI、Cursor、Pi 和 Kimi Code 提供内置模板，例如：
-
-```text
-Claude Code: cd {cwd} && claude --resume {sessionId}
-Codex:       cd {cwd} && codex resume {sessionId}
-```
-
-`{cwd}` 会替换为会话记录的项目目录，`{sessionId}` 会替换为源 Session ID。模板按
-来源分别保存在应用数据库中。也可以只输入自定义前缀，例如 `yolo`，复制结果会自动
-变成 `yolo <session-id>`。
-
-在 macOS 上，“在终端中恢复”可以把生成后的命令交给 Terminal、iTerm2、Warp，或
-自定义的绝对应用/可执行文件路径。自定义 `.app` 路径会打开应用自己生成的
-`.command` 文件；自定义可执行文件使用 `-e <shell> -lic` 参数。所有终端命令都会
-通过配置的交互式登录 Shell 执行，因此可以读取其启动文件中的 `yolo` 等别名。
-Shell 路径默认优先使用服务进程的绝对 `$SHELL`，否则使用 `/bin/zsh`。
-自定义 Shell 需要支持 `-lic`，常见选择包括 `/bin/zsh` 和 `/bin/bash`。只有服务监听在
-`localhost`、`127.0.0.1` 或 `::1` 时才允许启动终端。
-如果 iTerm2 已经有窗口，AI Session Search 会在当前窗口中新建 Tab；只有完全没有
-iTerm2 窗口时才会新建窗口。
-
-## 自动发现与配置
-
-路径按以下优先级解析：
-
-| 数据 | CLI | 应用环境变量 | 原生环境变量 | 默认值 |
-| --- | --- | --- | --- | --- |
-| Claude Code | `--claude-dir` | `AI_SESSION_CLAUDE_HOME` | `CLAUDE_CONFIG_DIR` | `~/.claude` |
-| Codex | `--codex-dir` | `AI_SESSION_CODEX_HOME` | `CODEX_HOME` | `~/.codex` |
-| 其他来源 | `--provider-dir provider=path` | `AI_SESSION_<PROVIDER>_HOME` | 部分来源支持原生变量 | 见下表 |
-| 本应用数据 | `--data-dir` | `AI_SESSION_DATA_DIR` | `XDG_DATA_HOME` | 平台应用数据目录 |
-
-### 命令行参数
-
-命令行参数的优先级高于环境变量。
-
-| 参数 | 环境变量 | 默认值 | 说明 |
-| --- | --- | --- | --- |
-| `-p, --port <port>` | `PORT` | `3411` | Web 服务监听端口 |
-| `-h, --hostname <hostname>` | `HOSTNAME` | `localhost` | 要监听的主机名或网络接口 |
-| `--claude-dir <path>` | `AI_SESSION_CLAUDE_HOME`，其次 `CLAUDE_CONFIG_DIR` | `~/.claude` | Claude Code 主目录 |
-| `--codex-dir <path>` | `AI_SESSION_CODEX_HOME`，其次 `CODEX_HOME` | `~/.codex` | Codex 主目录 |
-| `--provider-dir <provider=path>` | 对应来源的环境变量 | 对应来源默认值 | 覆盖来源主目录，可重复使用 |
-| `--data-dir <path>` | `AI_SESSION_DATA_DIR`，其次 `XDG_DATA_HOME` | 平台应用数据目录 | 应用数据库目录 |
-| `--providers <providers>` | `AI_SESSION_PROVIDERS` | `auto` | `auto` 或逗号分隔的来源列表 |
-| `--no-watch` | — | 默认启用监听 | 关闭会话文件变化后的自动重新索引 |
-| `--help` | — | — | 显示 CLI 帮助 |
-
-示例：
-
-```bash
-corepack pnpm start --hostname 127.0.0.1 --port 8080
-```
-
-支持的来源 ID 和默认主目录：
-
-| 来源 ID | 客户端 | 默认主目录 |
+| ID | 客户端 | 默认目录 |
 | --- | --- | --- |
 | `claude` | Claude Code | `~/.claude` |
 | `codex` | Codex | `~/.codex` |
@@ -126,92 +53,73 @@ corepack pnpm start --hostname 127.0.0.1 --port 8080
 | `pi` | Pi | `~/.pi` |
 | `kimi` | Kimi Code | `~/.kimi-code` |
 
-例如，`--provider-dir kimi=/custom/kimi --provider-dir pi=/custom/pi` 可以覆盖两个来源的目录，不会写死任何用户路径。`--providers` 只扫描选中的来源；使用 `auto` 时会对所有已注册来源进行自动检测。
+路径优先级为：CLI 参数 → `AI_SESSION_*` 环境变量 → 客户端原生环境变量 → 平台默认目录。
+因此不会写死用户主目录。
 
-Claude Code 扫描：
+## CLI / Web 版本
 
-```text
-<claude-home>/projects/**/*.jsonl
-```
-
-Codex 扫描：
-
-```text
-<codex-home>/sessions/**/*.jsonl
-<codex-home>/archived_sessions/**/*.jsonl
-```
-
-`history.jsonl` 和 `session_index.jsonl` 不作为会话发现来源；Codex 的
-`session_index.jsonl` 只用于补充已有会话的标题。
-
-## 国际化
-
-应用使用 Lingui 管理界面翻译，并根据浏览器提供的系统首选语言自动选择语言：
-
-- `zh-*`：简体中文
-- `en-*`：英文
-- 其他语言：回退为英文
-
-语言检测与翻译目录位于 `src/client/i18n/`。新增语言时需要增加对应 Catalog，并在
-`localeDetection.ts` 中注册语言标签映射。
-
-## 本地开发
-
-要求：
-
-- Node.js 24 或更高版本（使用内置 `node:sqlite`）
-- pnpm 11
+要求 Node.js 24+ 和 pnpm 11：
 
 ```bash
 corepack pnpm install
-corepack pnpm dev
-```
-
-开发模式：
-
-- 前端：http://localhost:3410
-- 后端：http://localhost:3411
-
-生产构建：
-
-```bash
 corepack pnpm build
 corepack pnpm start
 ```
 
-只启用 Codex，并指定自定义目录：
+默认地址为 `http://localhost:3411`。
+
+| 参数 | 环境变量 | 默认值 |
+| --- | --- | --- |
+| `-p, --port <port>` | `PORT` | `3411` |
+| `-h, --hostname <hostname>` | `HOSTNAME` | `localhost` |
+| `--claude-dir <path>` | `AI_SESSION_CLAUDE_HOME` / `CLAUDE_CONFIG_DIR` | `~/.claude` |
+| `--codex-dir <path>` | `AI_SESSION_CODEX_HOME` / `CODEX_HOME` | `~/.codex` |
+| `--provider-dir <provider=path>` | `AI_SESSION_<PROVIDER>_HOME` | 来源默认目录 |
+| `--data-dir <path>` | `AI_SESSION_DATA_DIR` / `XDG_DATA_HOME` | 平台应用数据目录 |
+| `--providers <ids>` | `AI_SESSION_PROVIDERS` | `auto` |
+| `--no-watch` | — | 默认监听文件变化 |
+
+示例：
 
 ```bash
-corepack pnpm start \
-  --providers codex \
-  --codex-dir /path/to/codex-home \
-  --data-dir /path/to/app-data
+corepack pnpm start --providers codex --codex-dir /path/to/codex-home
+corepack pnpm start --provider-dir kimi=/custom/kimi --provider-dir pi=/custom/pi
 ```
 
-关闭文件监听：
+## 恢复命令
 
-```bash
-corepack pnpm start --no-watch
+内置模板示例：
+
+```text
+Claude Code: cd {cwd} && claude --resume {sessionId}
+Codex:       cd {cwd} && codex resume {sessionId}
 ```
 
-## 验证
+`{cwd}` 和 `{sessionId}` 会从会话自动替换。也可以把模板设置为 `yolo`，复制结果会自动
+追加 Session ID。macOS 终端执行使用可配置的绝对 Shell 路径和 `-lic`，因此可以读取
+`~/.zshrc` 中的别名；iTerm2 会优先在当前窗口打开新 Tab。
+
+## 开发与发布
 
 ```bash
+corepack pnpm dev             # Web 开发模式
+corepack pnpm desktop:start   # 启动 Electron
+corepack pnpm desktop:make    # 构建当前平台客户端
 corepack pnpm test
 corepack pnpm typecheck
 corepack pnpm build
 ```
 
-## 隐私边界
+推送 `v*` 标签后，GitHub Actions 会自动构建 macOS arm64、macOS x64、Windows x64，
+并把产物加入 GitHub Release。
 
-- 索引完全保存在本地。
+## 隐私与许可证
+
 - 不读取 `auth.json`、API Key 或登录凭证。
-- 只有用户点击“在终端中恢复”后才执行恢复命令；非回环监听时该接口禁用。
-- 不执行会话中的命令或工具调用。
-- 远程暴露服务前应自行增加认证和网络访问控制；默认仅监听 `localhost`。
-
-## 上游与许可证
+- 不执行会话内容中的命令或工具调用。
+- 终端恢复仅在用户点击后执行，并要求服务监听回环地址。
+- 如需远程暴露 Web 服务，请自行增加认证和网络访问控制。
 
 搜索架构参考并改编自
-[d-kimuson/claude-code-viewer](https://github.com/d-kimuson/claude-code-viewer)，
-上游采用 MIT License。详细署名见 [NOTICE.md](./NOTICE.md)。本项目同样采用 MIT License。
+[d-kimuson/claude-code-viewer](https://github.com/d-kimuson/claude-code-viewer)。详见
+[NOTICE.md](./NOTICE.md)。项目采用 [MIT License](./LICENSE)。

@@ -1,5 +1,5 @@
 import { useLingui } from "@lingui/react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type {
   CollectionSummary,
   NormalizedMessage,
@@ -9,6 +9,7 @@ import type {
   ResumeCommandTemplates,
   SearchResult,
   SessionSummary,
+  SyncProgress,
   TerminalId,
   TerminalSettings,
 } from "../shared/types.ts";
@@ -18,14 +19,36 @@ import {
   renderResumeCommand,
 } from "../shared/resumeCommand.ts";
 import type { Translator } from "./i18n/index.ts";
+import {
+  clampSidebarWidth,
+  DEFAULT_SIDEBAR_WIDTH,
+  parseStoredSidebarWidth,
+  SIDEBAR_STORAGE_KEY,
+} from "./sidebarWidth.ts";
 
 type Project = { provider: ProviderId; projectPath: string; count: number };
 type SessionDetail = { session: SessionSummary; messages: NormalizedMessage[] };
+type AppStatus = {
+  providers: ProviderStatus[];
+  counts: Record<ProviderId, number>;
+  sync: SyncProgress;
+};
+
+const GITHUB_URL = "https://github.com/lililib/ai-session-search";
 
 const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   terminal: "terminal",
   customPath: null,
   shellPath: "/bin/zsh",
+};
+
+const initialSidebarWidth = (): number => {
+  try {
+    const stored = parseStoredSidebarWidth(window.localStorage.getItem(SIDEBAR_STORAGE_KEY));
+    return clampSidebarWidth(stored ?? DEFAULT_SIDEBAR_WIDTH, window.innerWidth);
+  } catch {
+    return DEFAULT_SIDEBAR_WIDTH;
+  }
 };
 
 const jsonRequest = async <T,>(input: string, init?: RequestInit): Promise<T> => {
@@ -96,7 +119,7 @@ export const App = () => {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [results, setResults] = useState<SearchResult[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [status, setStatus] = useState<{ providers: ProviderStatus[]; counts: Record<ProviderId, number> } | null>(null);
+  const [status, setStatus] = useState<AppStatus | null>(null);
   const [selected, setSelected] = useState<SessionDetail | null>(null);
   const [selectedMessageIndex, setSelectedMessageIndex] = useState<number | null>(null);
   const [editingTitle, setEditingTitle] = useState(false);
@@ -112,6 +135,10 @@ export const App = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [sidebarWidth, setSidebarWidth] = useState(initialSidebarWidth);
+  const appShellRef = useRef<HTMLDivElement>(null);
+  const sidebarWidthRef = useRef(sidebarWidth);
+  const resizingSidebarRef = useRef(false);
   const messageRefs = useRef(new Map<number, HTMLElement>());
 
   useEffect(() => {
@@ -164,26 +191,34 @@ export const App = () => {
     [provider, projectPath, favoritesOnly, renamedOnly, collectionFilter],
   );
 
-  const refreshSidebar = async (): Promise<void> => {
+  const refreshSidebar = useCallback(async (): Promise<void> => {
     const suffix = queryString(filters);
     const [sessionData, projectData, statusData, collectionData] = await Promise.all([
       jsonRequest<{ sessions: SessionSummary[] }>(`/api/sessions?${suffix}`),
       jsonRequest<{ projects: Project[] }>("/api/projects"),
-      jsonRequest<{ providers: ProviderStatus[]; counts: Record<ProviderId, number> }>("/api/status"),
+      jsonRequest<AppStatus>("/api/status"),
       jsonRequest<{ collections: CollectionSummary[] }>("/api/collections"),
     ]);
     setSessions(sessionData.sessions);
     setProjects(projectData.projects);
     setStatus(statusData);
     setCollections(collectionData.collections);
-  };
+  }, [filters]);
 
   useEffect(() => {
     setLoading(true);
     refreshSidebar()
       .catch((caught: unknown) => setError(String(caught)))
       .finally(() => setLoading(false));
-  }, [filters]);
+  }, [refreshSidebar]);
+
+  useEffect(() => {
+    if (status?.sync.running !== true) return;
+    const timer = window.setInterval(() => {
+      void refreshSidebar().catch((caught: unknown) => setError(String(caught)));
+    }, 750);
+    return () => window.clearInterval(timer);
+  }, [status?.sync.running, refreshSidebar]);
 
   useEffect(() => {
     if (debouncedQuery === "") {
@@ -393,9 +428,38 @@ export const App = () => {
     (item) => (status?.counts[item.id] ?? 0) > 0,
   );
   const collectionNames = new Map(collections.map((collection) => [collection.id, collection.name]));
+  const syncProgress = status?.sync ?? null;
+  const providerFileProgress =
+    syncProgress !== null && syncProgress.totalFiles > 0
+      ? syncProgress.processedFiles / syncProgress.totalFiles
+      : 0;
+  const overallSyncProgress =
+    syncProgress === null
+      ? 0
+      : syncProgress.completedProviders + providerFileProgress;
+
+  const applySidebarWidth = (requestedWidth: number): number => {
+    const width = clampSidebarWidth(requestedWidth, window.innerWidth);
+    sidebarWidthRef.current = width;
+    appShellRef.current?.style.setProperty("--sidebar-width", `${width}px`);
+    return width;
+  };
+
+  const saveSidebarWidth = (width: number): void => {
+    setSidebarWidth(width);
+    try {
+      window.localStorage.setItem(SIDEBAR_STORAGE_KEY, String(width));
+    } catch {
+      // Resizing remains available when storage is blocked.
+    }
+  };
 
   return (
-    <div className="app-shell">
+    <div
+      className="app-shell"
+      ref={appShellRef}
+      style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}
+    >
       <aside className="sidebar">
         <header className="brand">
           <div className="brand-mark">⌕</div>
@@ -403,7 +467,47 @@ export const App = () => {
             <h1>AI Session Search</h1>
             <p>{t("app.tagline")}</p>
           </div>
+          <a
+            className="github-link"
+            href={GITHUB_URL}
+            target="_blank"
+            rel="noreferrer"
+            title={t("github.open")}
+            aria-label={t("github.open")}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 .7a11.5 11.5 0 0 0-3.64 22.4c.58.1.79-.25.79-.56v-2.23c-3.22.7-3.9-1.37-3.9-1.37-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.71.08-.71 1.17.08 1.78 1.2 1.78 1.2 1.04 1.77 2.72 1.26 3.38.96.1-.75.41-1.27.74-1.56-2.57-.3-5.27-1.29-5.27-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.47.11-3.06 0 0 .97-.31 3.16 1.18a10.94 10.94 0 0 1 5.76 0c2.2-1.49 3.16-1.18 3.16-1.18.63 1.59.23 2.77.11 3.06.74.81 1.19 1.84 1.19 3.1 0 4.42-2.71 5.39-5.29 5.68.42.36.79 1.06.79 2.14v3.18c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .7Z" />
+            </svg>
+          </a>
         </header>
+
+        {syncProgress?.running === true && (
+          <div className="indexing-status" role="status" aria-live="polite">
+            <div className="indexing-status-copy">
+              <strong>{t("indexing.title")}</strong>
+              <span>
+                {syncProgress.currentProvider === null
+                  ? t("indexing.preparing")
+                  : t("indexing.provider", {
+                      provider: providerLabel(syncProgress.currentProvider),
+                    })}
+              </span>
+            </div>
+            <progress value={overallSyncProgress} max={Math.max(syncProgress.totalProviders, 1)} />
+            <small>
+              {t("indexing.progress", {
+                completed: syncProgress.completedProviders,
+                total: syncProgress.totalProviders,
+              })}
+              {syncProgress.totalFiles > 0
+                ? ` · ${t("indexing.files", {
+                    processed: syncProgress.processedFiles,
+                    total: syncProgress.totalFiles,
+                  })}`
+                : ""}
+            </small>
+          </div>
+        )}
 
         <div className="search-box">
           <span>⌕</span>
@@ -567,6 +671,7 @@ export const App = () => {
               <span key={item.provider}>{providerLabel(item.provider)} {status.counts[item.provider]}</span>
             ))}
           <button
+            disabled={syncProgress?.running === true}
             onClick={() => {
               setLoading(true);
               void jsonRequest("/api/sync", { method: "POST" })
@@ -578,6 +683,51 @@ export const App = () => {
           </button>
         </footer>
       </aside>
+
+      <div
+        className="sidebar-resizer"
+        role="separator"
+        aria-label={t("sidebar.resize")}
+        aria-orientation="vertical"
+        aria-valuemin={280}
+        aria-valuemax={720}
+        aria-valuenow={sidebarWidth}
+        tabIndex={0}
+        onDoubleClick={() => saveSidebarWidth(applySidebarWidth(DEFAULT_SIDEBAR_WIDTH))}
+        onPointerDown={(event) => {
+          resizingSidebarRef.current = true;
+          event.currentTarget.setPointerCapture(event.pointerId);
+          document.body.classList.add("resizing-sidebar");
+        }}
+        onPointerMove={(event) => {
+          if (!resizingSidebarRef.current) return;
+          applySidebarWidth(event.clientX);
+        }}
+        onPointerUp={(event) => {
+          if (!resizingSidebarRef.current) return;
+          resizingSidebarRef.current = false;
+          event.currentTarget.releasePointerCapture(event.pointerId);
+          document.body.classList.remove("resizing-sidebar");
+          saveSidebarWidth(sidebarWidthRef.current);
+        }}
+        onPointerCancel={() => {
+          resizingSidebarRef.current = false;
+          document.body.classList.remove("resizing-sidebar");
+          saveSidebarWidth(sidebarWidthRef.current);
+        }}
+        onKeyDown={(event) => {
+          const delta = event.key === "ArrowLeft" ? -24 : event.key === "ArrowRight" ? 24 : 0;
+          const requestedWidth =
+            event.key === "Home"
+              ? 0
+              : event.key === "End"
+                ? Number.MAX_SAFE_INTEGER
+                : sidebarWidthRef.current + delta;
+          if (delta === 0 && event.key !== "Home" && event.key !== "End") return;
+          event.preventDefault();
+          saveSidebarWidth(applySidebarWidth(requestedWidth));
+        }}
+      />
 
       <main className="conversation-pane">
         {selected === null ? (

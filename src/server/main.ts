@@ -20,19 +20,23 @@ const program = new Command()
 program.action(async (rawOptions: CliOptions) => {
   const config = resolveConfig(rawOptions);
   const runtime = await startServer(config);
-  for (const result of runtime.syncResults) {
-    process.stdout.write(
-      `[${result.provider}] discovered=${result.discovered} indexed=${result.indexed} unchanged=${result.unchanged} removed=${result.removed} errors=${result.errors}\n`,
-    );
-  }
   process.stdout.write(`AI Session Search: ${runtime.url}\n`);
 
+  let shuttingDown = false;
   const shutdown = async (): Promise<void> => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     await runtime.close();
     process.exit(0);
   };
   process.on("SIGINT", () => void shutdown());
   process.on("SIGTERM", () => void shutdown());
+
+  for (const result of await runtime.initialSync) {
+    process.stdout.write(
+      `[${result.provider}] discovered=${result.discovered} indexed=${result.indexed} unchanged=${result.unchanged} removed=${result.removed} errors=${result.errors}\n`,
+    );
+  }
 });
 
 await program.parseAsync(process.argv);

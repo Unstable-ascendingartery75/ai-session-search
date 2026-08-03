@@ -85,6 +85,7 @@ export const createApp = (options: {
       providers: await indexer.status(),
       counts: database.countSessions(),
       watch: config.watch,
+      sync: indexer.syncProgress(),
     }),
   );
 
