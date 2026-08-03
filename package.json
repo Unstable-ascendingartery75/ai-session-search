@@ -1,9 +1,11 @@
 {
   "name": "ai-session-search",
+  "productName": "AI Session Search",
   "version": "0.2.0",
   "private": true,
   "description": "Read-only local search for AI coding agent conversations.",
   "type": "module",
+  "main": "dist/desktop/main.cjs",
   "bin": {
     "ai-session-search": "./dist/server/main.mjs"
   },
@@ -11,15 +13,22 @@
     "dev": "run-p dev:server dev:client",
     "dev:server": "tsx watch src/server/main.ts",
     "dev:client": "vite",
-    "build": "run-s build:client build:server",
+    "build": "run-s build:client build:server build:desktop",
     "build:client": "vite build",
     "build:server": "tsdown src/server/main.ts --format esm --out-dir dist/server",
+    "build:desktop": "tsdown --config tsdown.desktop.config.ts",
+    "desktop:start": "run-s build && electron .",
+    "desktop:package": "run-s build && electron-forge package",
+    "desktop:make": "run-s build && electron-forge make",
     "start": "node dist/server/main.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "engines": {
     "node": ">=24.0.0"
+  },
+  "peerDependencies": {
+    "electron": "43.2.0"
   },
   "packageManager": "pnpm@11.0.9",
   "dependencies": {
@@ -34,10 +43,14 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
+    "@electron-forge/cli": "7.11.2",
+    "@electron-forge/maker-squirrel": "7.11.2",
+    "@electron-forge/maker-zip": "7.11.2",
     "@types/node": "25.6.2",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react-swc": "4.3.0",
+    "electron": "43.2.0",
     "npm-run-all2": "8.0.4",
     "tsdown": "0.21.10",
     "tsx": "4.21.0",

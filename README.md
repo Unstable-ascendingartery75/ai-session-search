@@ -11,6 +11,30 @@ easy to find natural language, code identifiers, file paths, and error messages.
 
 ![AI Session Search interface](./docs/images/ai-session-search.png)
 
+## Desktop clients
+
+macOS application ZIPs (Apple Silicon and Intel) and a Windows x64 `Setup.exe` are published on
+[GitHub Releases](https://github.com/lililib/ai-session-search/releases). The desktop client does
+not require Node.js. It starts the bundled service on a random loopback port and automatically
+discovers sessions belonging to the current user. Its database is stored in the operating
+system's application-data directory for AI Session Search and never depends on a developer's
+machine-specific paths.
+
+The current packages are not signed with an Apple Developer ID or Windows Authenticode
+certificate, so Gatekeeper or Microsoft Defender SmartScreen may show a warning on first launch.
+**Open in terminal** is currently available only on macOS. The Windows client still supports
+search, reading, collections, renaming, and copying Session IDs or resume commands.
+
+Run the desktop client from source or make a package for the current platform:
+
+```bash
+corepack pnpm desktop:start
+corepack pnpm desktop:make
+```
+
+Artifacts are written to `out/make/`. Pushing a `v*` tag runs GitHub Actions for macOS arm64,
+macOS x64, and Windows x64, then attaches the artifacts to the matching GitHub Release.
+
 ## Features
 
 - Automatically discovers Claude Code, Codex, Antigravity, OpenCode, Hermes, GitHub Copilot CLI, Droid, OpenClaw, Cursor, Pi, and Kimi Code sessions
@@ -20,11 +44,12 @@ easy to find natural language, code identifiers, file paths, and error messages.
 - Read-only conversation viewer with matched-message navigation
 - Custom session titles
 - Favorite and renamed-session filters
-- Searches custom titles while preserving and displaying original titles
+- Searches message content, custom titles, and full or partial session IDs
 - Creates, renames, and deletes local collections
 - Organizes sessions into collections or filters uncategorized sessions
 - Copies Session IDs and resume commands
 - Supports provider-specific custom resume command templates
+- Opens resume commands in Terminal, iTerm2, Warp, or a custom terminal path
 - Automatically selects English or Simplified Chinese from browser language preferences
 - Reindexes sessions automatically when source files change
 - Requires no Anthropic API, OpenAI API, or cloud database
@@ -46,6 +71,18 @@ Codex:       cd {cwd} && codex resume {sessionId}
 replaced with the source Session ID. Templates are stored separately for each provider in the
 application database. A custom prefix such as `yolo` is also valid and produces
 `yolo <session-id>`.
+
+On macOS, **Open in terminal** can execute the rendered resume command in Terminal, iTerm2,
+Warp, or a custom absolute application/executable path. Custom `.app` paths are opened with an
+application-owned `.command` file; custom executables are invoked using `-e /bin/zsh -lic`.
+All terminal commands run through the configured interactive login shell so aliases from its
+startup files, such as `yolo`, are available. The shell path defaults to the server process's
+`$SHELL` when it is an absolute path, otherwise `/bin/zsh`. Custom shells must support `-lic`;
+common choices include `/bin/zsh` and `/bin/bash`.
+When iTerm2 already has a window, AI Session Search opens the resume command in a new tab of
+the current window; it creates a window only when none exists.
+Terminal launching is enabled only while the server is bound to `localhost`, `127.0.0.1`, or
+`::1`.
 
 ## Automatic discovery and configuration
 
@@ -77,7 +114,7 @@ Command-line options take precedence over environment variables.
 Example:
 
 ```bash
-corepack pnpm start -- --hostname 127.0.0.1 --port 8080
+corepack pnpm start --hostname 127.0.0.1 --port 8080
 ```
 
 Supported provider IDs and default homes:
@@ -152,7 +189,7 @@ corepack pnpm start
 Enable only Codex and provide custom directories:
 
 ```bash
-corepack pnpm start -- \
+corepack pnpm start \
   --providers codex \
   --codex-dir /path/to/codex-home \
   --data-dir /path/to/app-data
@@ -161,7 +198,7 @@ corepack pnpm start -- \
 Disable file watching:
 
 ```bash
-corepack pnpm start -- --no-watch
+corepack pnpm start --no-watch
 ```
 
 ## Validation
@@ -176,7 +213,8 @@ corepack pnpm build
 
 - The index stays entirely on the local device.
 - The application does not read `auth.json`, API keys, or login credentials.
-- It copies resume commands but never executes, sends, resumes, or continues sessions.
+- It executes a rendered resume command only after the user clicks **Open in terminal**; this
+  endpoint is disabled for non-loopback listeners.
 - It never executes commands or tool calls found in session content.
 - Add authentication and network access controls before exposing the service remotely. By
   default, it listens only on `localhost`.

@@ -9,6 +9,8 @@ import type {
   ResumeCommandTemplates,
   SearchResult,
   SessionSummary,
+  TerminalId,
+  TerminalSettings,
 } from "../shared/types.ts";
 import { PROVIDER_DESCRIPTORS, providerDescriptor } from "../shared/providers.ts";
 import {
@@ -20,9 +22,19 @@ import type { Translator } from "./i18n/index.ts";
 type Project = { provider: ProviderId; projectPath: string; count: number };
 type SessionDetail = { session: SessionSummary; messages: NormalizedMessage[] };
 
+const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
+  terminal: "terminal",
+  customPath: null,
+  shellPath: "/bin/zsh",
+};
+
 const jsonRequest = async <T,>(input: string, init?: RequestInit): Promise<T> => {
   const response = await fetch(input, init);
-  if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+  if (!response.ok) {
+    const body = await response.json().catch(() => null) as { error?: unknown } | null;
+    const detail = typeof body?.error === "string" ? `: ${body.error}` : "";
+    throw new Error(`Request failed: ${response.status}${detail}`);
+  }
   return response.json() as Promise<T>;
 };
 
@@ -93,6 +105,10 @@ export const App = () => {
     useState<ResumeCommandTemplates>(DEFAULT_RESUME_COMMAND_TEMPLATES);
   const [editingResumeCommand, setEditingResumeCommand] = useState(false);
   const [resumeCommandDraft, setResumeCommandDraft] = useState("");
+  const [terminalSettings, setTerminalSettings] = useState<TerminalSettings>(DEFAULT_TERMINAL_SETTINGS);
+  const [terminalDraft, setTerminalDraft] = useState<TerminalId>("terminal");
+  const [customTerminalPathDraft, setCustomTerminalPathDraft] = useState("");
+  const [shellPathDraft, setShellPathDraft] = useState("/bin/zsh");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -117,6 +133,9 @@ export const App = () => {
       .catch((caught: unknown) => setError(String(caught)));
     jsonRequest<{ templates: ResumeCommandTemplates }>("/api/settings/resume-commands")
       .then((data) => setResumeCommandTemplates(data.templates))
+      .catch((caught: unknown) => setError(String(caught)));
+    jsonRequest<{ settings: TerminalSettings }>("/api/settings/terminal")
+      .then((data) => setTerminalSettings(data.settings))
       .catch((caught: unknown) => setError(String(caught)));
   }, []);
 
@@ -258,21 +277,56 @@ export const App = () => {
     }
   };
 
-  const saveResumeCommand = async (): Promise<void> => {
-    if (selected === null || resumeCommandDraft.trim() === "") return;
+  const openResumeInTerminal = async (): Promise<void> => {
+    if (selected === null) return;
+    const template = resumeCommandTemplates[selected.session.provider];
+    if (template === undefined) return;
+    const command = renderResumeCommand(template, {
+      sessionId: selected.session.sourceSessionId,
+      cwd: selected.session.projectPath,
+    });
     try {
-      const response = await jsonRequest<{ templates: ResumeCommandTemplates }>(
-        `/api/settings/resume-commands/${selected.session.provider}`,
-        {
+      await jsonRequest(`/api/sessions/${encodeURIComponent(selected.session.sessionKey)}/open-terminal`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      setNotice(t("notice.terminalLaunched"));
+    } catch (caught) {
+      setError(String(caught));
+    }
+  };
+
+  const saveCommandSettings = async (): Promise<void> => {
+    if (selected === null || resumeCommandDraft.trim() === "") return;
+    const customPath = customTerminalPathDraft.trim() || null;
+    const shellPath = shellPathDraft.trim();
+    if ((terminalDraft === "custom" && customPath === null) || shellPath === "") return;
+    try {
+      const [commandResponse, terminalResponse] = await Promise.all([
+        jsonRequest<{ templates: ResumeCommandTemplates }>(
+          `/api/settings/resume-commands/${selected.session.provider}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ template: resumeCommandDraft }),
+          },
+        ),
+        jsonRequest<{ settings: TerminalSettings }>("/api/settings/terminal", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ template: resumeCommandDraft }),
-        },
-      );
-      setResumeCommandTemplates(response.templates);
+          body: JSON.stringify({
+            terminal: terminalDraft,
+            customPath: terminalDraft === "custom" ? customPath : null,
+            shellPath,
+          }),
+        }),
+      ]);
+      setResumeCommandTemplates(commandResponse.templates);
+      setTerminalSettings(terminalResponse.settings);
       setEditingResumeCommand(false);
       setNotice(
-        t("notice.resumeSaved", { provider: providerLabel(selected.session.provider) }),
+        t("notice.commandSettingsSaved", { provider: providerLabel(selected.session.provider) }),
       );
     } catch (caught) {
       setError(String(caught));
@@ -579,9 +633,15 @@ export const App = () => {
                     <button title={t("session.copyResume")} onClick={() => void copyResumeCommand()}>
                       {t("session.copyResume")}
                     </button>
+                    <button title={t("session.openTerminal")} onClick={() => void openResumeInTerminal()}>
+                      {t("session.openTerminal")}
+                    </button>
                     <button
                       onClick={() => {
                         setResumeCommandDraft(resumeCommandTemplates[selected.session.provider] ?? "");
+                        setTerminalDraft(terminalSettings.terminal);
+                        setCustomTerminalPathDraft(terminalSettings.customPath ?? "");
+                        setShellPathDraft(terminalSettings.shellPath);
                         setEditingResumeCommand((value) => !value);
                       }}
                     >
@@ -644,13 +704,13 @@ export const App = () => {
                       value={resumeCommandDraft}
                       onChange={(event) => setResumeCommandDraft(event.target.value)}
                       onKeyDown={(event) => {
-                        if (event.key === "Enter") void saveResumeCommand();
+                        if (event.key === "Enter") void saveCommandSettings();
                         if (event.key === "Escape") setEditingResumeCommand(false);
                       }}
                       maxLength={500}
                       autoFocus
                     />
-                    <button onClick={() => void saveResumeCommand()}>{t("common.save")}</button>
+                    <button onClick={() => void saveCommandSettings()}>{t("common.save")}</button>
                     <button
                       onClick={() =>
                         setResumeCommandDraft(DEFAULT_RESUME_COMMAND_TEMPLATES[selected.session.provider] ?? "")
@@ -676,6 +736,39 @@ export const App = () => {
                       })}
                     </code>
                   )}
+                  <div className="terminal-settings">
+                    <label htmlFor="terminal-kind">{t("terminal.type")}</label>
+                    <select
+                      id="terminal-kind"
+                      value={terminalDraft}
+                      onChange={(event) => setTerminalDraft(event.target.value as TerminalId)}
+                    >
+                      <option value="terminal">Terminal</option>
+                      <option value="iterm2">iTerm2</option>
+                      <option value="warp">Warp</option>
+                      <option value="custom">{t("terminal.custom")}</option>
+                    </select>
+                    {terminalDraft === "custom" && (
+                      <input
+                        value={customTerminalPathDraft}
+                        onChange={(event) => setCustomTerminalPathDraft(event.target.value)}
+                        placeholder="/Applications/Ghostty.app"
+                        maxLength={1000}
+                      />
+                    )}
+                  </div>
+                  <div className="terminal-settings shell-settings">
+                    <label htmlFor="terminal-shell-path">{t("terminal.shellPath")}</label>
+                    <input
+                      id="terminal-shell-path"
+                      value={shellPathDraft}
+                      onChange={(event) => setShellPathDraft(event.target.value)}
+                      placeholder="/bin/zsh"
+                      maxLength={1000}
+                    />
+                  </div>
+                  <p>{t("terminal.pathHelp")}</p>
+                  <p>{t("terminal.shellPathHelp")}</p>
                 </div>
               )}
             </header>

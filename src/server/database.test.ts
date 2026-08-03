@@ -86,6 +86,29 @@ describe("SearchDatabase", () => {
     expect(database.search({ query: "CallbackService" })[0]?.messageIndex).toBe(1);
   });
 
+  test("searches sessions by full or partial session ID", async () => {
+    const database = await createDatabase();
+    const sessionId = "019fc543-bed2-7e21-bc69-35cb2091fcae";
+    const session = {
+      ...sampleSession(),
+      sessionKey: `codex:${sessionId}`,
+      sourceSessionId: sessionId,
+      filePath: `/tmp/${sessionId}.jsonl`,
+    };
+    database.upsertSession(session, {
+      provider: "codex",
+      path: session.filePath,
+      mtimeMs: 1,
+      size: 100,
+    });
+
+    expect(database.search({ query: sessionId })[0]).toMatchObject({
+      sessionKey: `codex:${sessionId}`,
+      sourceSessionId: sessionId,
+    });
+    expect(database.search({ query: "35cb2091" })[0]?.sessionKey).toBe(`codex:${sessionId}`);
+  });
+
   test("persists custom title and favorite metadata and searches the custom title", async () => {
     const database = await createDatabase();
     database.upsertSession(sampleSession(), {
@@ -179,6 +202,32 @@ describe("SearchDatabase", () => {
 
     expect(database.updateResumeCommandTemplate("codex", "yolo").codex).toBe("yolo");
     expect(database.getResumeCommandTemplates().codex).toBe("yolo");
+  });
+
+  test("provides and persists terminal launch settings", async () => {
+    const database = await createDatabase();
+
+    expect(database.getTerminalSettings()).toMatchObject({
+      terminal: "terminal",
+      customPath: null,
+      shellPath: expect.stringMatching(/^\//),
+    });
+    expect(
+      database.updateTerminalSettings({
+        terminal: "custom",
+        customPath: "/Applications/Ghostty.app",
+        shellPath: "/bin/bash",
+      }),
+    ).toEqual({
+      terminal: "custom",
+      customPath: "/Applications/Ghostty.app",
+      shellPath: "/bin/bash",
+    });
+    expect(database.getTerminalSettings()).toEqual({
+      terminal: "custom",
+      customPath: "/Applications/Ghostty.app",
+      shellPath: "/bin/bash",
+    });
   });
 
   test("migrates the two-provider constraint and indexes a new provider", async () => {

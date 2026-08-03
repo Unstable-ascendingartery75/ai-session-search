@@ -1,13 +1,15 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { serveStatic } from "@hono/node-server/serve-static";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { z } from "zod";
-import type { ProviderId } from "../shared/types.ts";
+import { TERMINAL_IDS, type ProviderId } from "../shared/types.ts";
 import { isProviderId, PROVIDER_DESCRIPTORS } from "../shared/providers.ts";
+import { renderResumeCommand } from "../shared/resumeCommand.ts";
 import type { AppConfig } from "./config.ts";
 import { SearchDatabase } from "./database.ts";
 import { SessionIndexer } from "./indexer.ts";
+import type { TerminalLauncher } from "./terminalLauncher.ts";
 
 const providerValue = (value: string | undefined): ProviderId | undefined =>
   value !== undefined && isProviderId(value) ? value : undefined;
@@ -37,13 +39,41 @@ const metadataSchema = z
 
 const collectionSchema = z.object({ name: z.string().trim().min(1).max(100) });
 const resumeCommandTemplateSchema = z.object({ template: z.string().trim().min(1).max(500) });
+const terminalSettingsSchema = z
+  .object({
+    terminal: z.enum(TERMINAL_IDS),
+    customPath: z.string().trim().max(1000).nullable(),
+    shellPath: z.string().trim().min(1).max(1000),
+  })
+  .refine(
+    (value) => value.terminal !== "custom" || (value.customPath?.length ?? 0) > 0,
+    { message: "Custom terminal path is required" },
+  );
+
+const isLoopbackHostname = (hostname: string): boolean =>
+  ["localhost", "127.0.0.1", "::1", "[::1]"].includes(hostname.toLocaleLowerCase());
+
+const isTrustedLaunchRequest = (context: Context): boolean => {
+  if (!context.req.header("content-type")?.toLocaleLowerCase().startsWith("application/json")) {
+    return false;
+  }
+  const origin = context.req.header("origin");
+  if (origin === undefined) return false;
+  try {
+    return new URL(origin).origin === new URL(context.req.url).origin;
+  } catch {
+    return false;
+  }
+};
 
 export const createApp = (options: {
   database: SearchDatabase;
   indexer: SessionIndexer;
   config: AppConfig;
+  terminalLauncher: Pick<TerminalLauncher, "launch">;
+  clientDirectory?: string;
 }): Hono => {
-  const { database, indexer, config } = options;
+  const { database, indexer, config, terminalLauncher } = options;
   const app = new Hono();
 
   app.get("/api/providers", (context) => context.json({
@@ -74,6 +104,32 @@ export const createApp = (options: {
         limit: Number.parseInt(query.limit ?? "100", 10),
       }),
     });
+  });
+
+  app.post("/api/sessions/:sessionKey/open-terminal", async (context) => {
+    if (!isLoopbackHostname(config.hostname) || !isTrustedLaunchRequest(context)) {
+      return context.json({ error: "Terminal launching is only available to same-origin loopback requests" }, 403);
+    }
+    const result = database.getSession(context.req.param("sessionKey"));
+    if (result === null) return context.json({ error: "Session not found" }, 404);
+    const template = database.getResumeCommandTemplates()[result.session.provider];
+    if (template === undefined) {
+      return context.json({ error: "Resume command is unavailable for this provider" }, 400);
+    }
+    const command = renderResumeCommand(template, {
+      sessionId: result.session.sourceSessionId,
+      cwd: result.session.projectPath,
+    });
+    try {
+      await terminalLauncher.launch(
+        database.getTerminalSettings(),
+        command,
+        result.session.projectPath,
+      );
+      return context.json({ launched: true, command });
+    } catch (error) {
+      return context.json({ error: String(error) }, 500);
+    }
   });
 
   app.get("/api/sessions/:sessionKey", (context) => {
@@ -167,9 +223,23 @@ export const createApp = (options: {
     });
   });
 
+  app.get("/api/settings/terminal", (context) =>
+    context.json({ settings: database.getTerminalSettings() }),
+  );
+
+  app.patch("/api/settings/terminal", async (context) => {
+    const parsed = terminalSettingsSchema.safeParse(await context.req.json());
+    if (!parsed.success) return context.json({ error: parsed.error.issues }, 400);
+    try {
+      return context.json({ settings: database.updateTerminalSettings(parsed.data) });
+    } catch (error) {
+      return context.json({ error: String(error) }, 400);
+    }
+  });
+
   app.post("/api/sync", async (context) => context.json({ results: await indexer.syncAll() }));
 
-  const clientDirectory = resolve(process.cwd(), "dist/client");
+  const clientDirectory = options.clientDirectory ?? resolve(process.cwd(), "dist/client");
   if (existsSync(clientDirectory)) {
     app.use("/*", serveStatic({ root: clientDirectory }));
     app.get("*", serveStatic({ root: clientDirectory, path: "index.html" }));

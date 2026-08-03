@@ -1,4 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
+import { isAbsolute } from "node:path";
 import type {
   CollectionSummary,
   NormalizedMessage,
@@ -7,10 +8,12 @@ import type {
   ResumeCommandTemplates,
   SearchResult,
   SessionSummary,
+  TerminalSettings,
 } from "../shared/types.ts";
 import { DEFAULT_RESUME_COMMAND_TEMPLATES } from "../shared/resumeCommand.ts";
 import { isProviderId } from "../shared/providers.ts";
 import { PROVIDER_IDS } from "../shared/types.ts";
+import { TERMINAL_IDS } from "../shared/types.ts";
 import type { SessionFile } from "./providers/types.ts";
 
 type SqlValue = string | number | bigint | Uint8Array | null;
@@ -326,7 +329,30 @@ export class SearchDatabase {
       JOIN sessions s ON s.session_key = f.session_key
       LEFT JOIN session_metadata m ON m.session_key = f.session_key
     `;
-    const rows =
+    const idSelect = `
+      SELECT s.session_key, s.source_session_id, s.provider, s.project_path,
+             s.original_title, m.custom_title, COALESCE(m.favorite, 0) favorite, m.collection_id,
+             s.started_at, s.updated_at, s.message_count,
+             -1 message_index, 'title' role, s.source_session_id content, -1000000 rank
+      FROM sessions s
+      LEFT JOIN session_metadata m ON m.session_key = s.session_key
+    `;
+    const idLikeQuery = escapeLikeQuery(query);
+    const idRows = this.#db
+      .prepare(
+        `${idSelect}
+         WHERE (s.source_session_id LIKE ? ESCAPE '\\' COLLATE NOCASE
+                OR s.session_key LIKE ? ESCAPE '\\' COLLATE NOCASE)${extraWhere}
+         ORDER BY CASE
+                    WHEN s.source_session_id = ? COLLATE NOCASE THEN 0
+                    WHEN s.session_key = ? COLLATE NOCASE THEN 1
+                    ELSE 2
+                  END,
+                  COALESCE(m.favorite, 0) DESC, s.updated_at DESC
+         LIMIT ?`,
+      )
+      .all(idLikeQuery, idLikeQuery, query, query, ...filterValues, limit) as SqlRow[];
+    const contentRows =
       query.length < 3
         ? (this.#db
             .prepare(
@@ -341,6 +367,12 @@ export class SearchDatabase {
                         s.updated_at DESC LIMIT ?`,
             )
             .all(escapeFtsQuery(query), ...filterValues, limit) as SqlRow[]);
+
+    const idSessionKeys = new Set(idRows.map((row) => stringColumn(row, "session_key")));
+    const rows = [
+      ...idRows,
+      ...contentRows.filter((row) => !idSessionKeys.has(stringColumn(row, "session_key"))),
+    ].slice(0, limit);
 
     return rows.map((row) => {
       const summary = toSessionSummary(row);
@@ -575,6 +607,58 @@ export class SearchDatabase {
       `)
       .run(`resume_command_template.${provider}`, normalized, Date.now());
     return this.getResumeCommandTemplates();
+  }
+
+  getTerminalSettings(): TerminalSettings {
+    const rows = this.#db
+      .prepare("SELECT key, value FROM app_settings WHERE key IN ('terminal.kind', 'terminal.custom_path', 'terminal.shell_path')")
+      .all() as SqlRow[];
+    const values = new Map(rows.map((row) => [stringColumn(row, "key"), stringColumn(row, "value")]));
+    const storedTerminal = values.get("terminal.kind");
+    const terminal = TERMINAL_IDS.includes(storedTerminal as TerminalSettings["terminal"])
+      ? (storedTerminal as TerminalSettings["terminal"])
+      : "terminal";
+    const customPath = values.get("terminal.custom_path")?.trim() || null;
+    const environmentShell = process.env.SHELL?.trim();
+    const defaultShellPath =
+      environmentShell !== undefined && isAbsolute(environmentShell) ? environmentShell : "/bin/zsh";
+    const storedShellPath = values.get("terminal.shell_path")?.trim();
+    const shellPath = storedShellPath !== undefined && isAbsolute(storedShellPath)
+      ? storedShellPath
+      : defaultShellPath;
+    return { terminal, customPath, shellPath };
+  }
+
+  updateTerminalSettings(settings: TerminalSettings): TerminalSettings {
+    if (!TERMINAL_IDS.includes(settings.terminal)) throw new Error("Unsupported terminal");
+    const customPath = settings.customPath?.trim() || null;
+    const shellPath = settings.shellPath.trim();
+    if (customPath !== null && customPath.length > 1000) {
+      throw new Error("Custom terminal path must not exceed 1000 characters");
+    }
+    if (settings.terminal === "custom" && customPath === null) {
+      throw new Error("Custom terminal path is required");
+    }
+    if (!isAbsolute(shellPath) || shellPath.length > 1000) {
+      throw new Error("Shell path must be an absolute path with at most 1000 characters");
+    }
+    const update = this.#db.prepare(`
+      INSERT INTO app_settings(key, value, updated_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
+    `);
+    const now = Date.now();
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      update.run("terminal.kind", settings.terminal, now);
+      update.run("terminal.custom_path", customPath ?? "", now);
+      update.run("terminal.shell_path", shellPath, now);
+      this.#db.exec("COMMIT");
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+    return { terminal: settings.terminal, customPath, shellPath };
   }
 
   listProjects(): Array<{ provider: ProviderId; projectPath: string; count: number }> {

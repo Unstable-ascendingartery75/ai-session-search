@@ -1,13 +1,7 @@
 #!/usr/bin/env node
-import { mkdir } from "node:fs/promises";
-import { join } from "node:path";
-import { serve } from "@hono/node-server";
 import { Command } from "commander";
-import { createApp } from "./app.ts";
 import { type CliOptions, resolveConfig } from "./config.ts";
-import { SearchDatabase } from "./database.ts";
-import { SessionIndexer } from "./indexer.ts";
-import { createEnabledProviders } from "./providers/registry.ts";
+import { startServer } from "./runtime.ts";
 
 const collectOption = (value: string, previous: string[]): string[] => [...previous, value];
 
@@ -25,35 +19,20 @@ const program = new Command()
 
 program.action(async (rawOptions: CliOptions) => {
   const config = resolveConfig(rawOptions);
-  await mkdir(config.dataDir, { recursive: true });
-  const database = new SearchDatabase(join(config.dataDir, "search.db"));
-  const providers = createEnabledProviders(config.providers, config.providerHomes);
-  const indexer = new SessionIndexer(database, providers);
-
-  const results = await indexer.syncAll();
-  for (const result of results) {
+  const runtime = await startServer(config);
+  for (const result of runtime.syncResults) {
     process.stdout.write(
       `[${result.provider}] discovered=${result.discovered} indexed=${result.indexed} unchanged=${result.unchanged} removed=${result.removed} errors=${result.errors}\n`,
     );
   }
-  if (config.watch) await indexer.startWatching();
+  process.stdout.write(`AI Session Search: ${runtime.url}\n`);
 
-  const server = serve({
-    fetch: createApp({ database, indexer, config }).fetch,
-    port: config.port,
-    hostname: config.hostname,
-  });
-  process.stdout.write(`AI Session Search: http://${config.hostname}:${config.port}\n`);
-
-  const shutdown = (): void => {
-    indexer.close();
-    server.close(() => {
-      database.close();
-      process.exit(0);
-    });
+  const shutdown = async (): Promise<void> => {
+    await runtime.close();
+    process.exit(0);
   };
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", () => void shutdown());
+  process.on("SIGTERM", () => void shutdown());
 });
 
 await program.parseAsync(process.argv);

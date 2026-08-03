@@ -10,6 +10,27 @@
 
 ![AI Session Search 界面](./docs/images/ai-session-search.png)
 
+## 桌面客户端
+
+macOS（Apple Silicon、Intel）`.zip` 应用包和 Windows x64 `Setup.exe` 会发布在
+[GitHub Releases](https://github.com/lililib/ai-session-search/releases)。桌面客户端无需安装
+Node.js：打开后会在随机的本机回环端口启动内置服务，并自动扫描当前用户的会话目录。
+应用数据库存放在操作系统分配给 AI Session Search 的应用数据目录，不依赖开发者机器上的路径。
+
+当前发布包未进行 Apple Developer ID 或 Windows Authenticode 签名，因此首次打开时可能出现
+Gatekeeper 或 Microsoft Defender SmartScreen 提示。“在终端中恢复”目前只支持 macOS；Windows
+客户端仍然支持搜索、阅读、收藏夹、重命名以及复制 Session ID/恢复命令。
+
+从源码启动或生成当前平台安装包：
+
+```bash
+corepack pnpm desktop:start
+corepack pnpm desktop:make
+```
+
+生成结果位于 `out/make/`。推送 `v*` 标签后，GitHub Actions 会分别构建 macOS arm64、
+macOS x64 和 Windows x64，并把文件加入对应的 GitHub Release。
+
 ## 功能
 
 - 自动发现 Claude Code、Codex、Antigravity、OpenCode、Hermes、GitHub Copilot CLI、Droid、OpenClaw、Cursor、Pi 与 Kimi Code 会话
@@ -20,11 +41,12 @@
 - 自定义会话名称
 - 收藏或取消收藏会话
 - 筛选所有已重命名的会话
-- 搜索自定义名称，同时保留并展示原始标题
+- 搜索消息内容、自定义名称以及完整或部分 Session ID
 - 创建、重命名和删除本地收藏夹
 - 将会话移动到收藏夹，或筛选尚未分类的会话
 - 一键复制 Session ID 或恢复命令
 - 按来源分别自定义恢复命令模板
+- 在 Terminal、iTerm2、Warp 或自定义终端路径中执行恢复命令
 - 根据浏览器与系统首选语言自动切换简体中文或英文界面
 - 文件变化后自动重新索引
 - 不需要 Anthropic API、OpenAI API 或云端数据库
@@ -44,6 +66,16 @@ Codex:       cd {cwd} && codex resume {sessionId}
 `{cwd}` 会替换为会话记录的项目目录，`{sessionId}` 会替换为源 Session ID。模板按
 来源分别保存在应用数据库中。也可以只输入自定义前缀，例如 `yolo`，复制结果会自动
 变成 `yolo <session-id>`。
+
+在 macOS 上，“在终端中恢复”可以把生成后的命令交给 Terminal、iTerm2、Warp，或
+自定义的绝对应用/可执行文件路径。自定义 `.app` 路径会打开应用自己生成的
+`.command` 文件；自定义可执行文件使用 `-e <shell> -lic` 参数。所有终端命令都会
+通过配置的交互式登录 Shell 执行，因此可以读取其启动文件中的 `yolo` 等别名。
+Shell 路径默认优先使用服务进程的绝对 `$SHELL`，否则使用 `/bin/zsh`。
+自定义 Shell 需要支持 `-lic`，常见选择包括 `/bin/zsh` 和 `/bin/bash`。只有服务监听在
+`localhost`、`127.0.0.1` 或 `::1` 时才允许启动终端。
+如果 iTerm2 已经有窗口，AI Session Search 会在当前窗口中新建 Tab；只有完全没有
+iTerm2 窗口时才会新建窗口。
 
 ## 自动发现与配置
 
@@ -75,7 +107,7 @@ Codex:       cd {cwd} && codex resume {sessionId}
 示例：
 
 ```bash
-corepack pnpm start -- --hostname 127.0.0.1 --port 8080
+corepack pnpm start --hostname 127.0.0.1 --port 8080
 ```
 
 支持的来源 ID 和默认主目录：
@@ -150,7 +182,7 @@ corepack pnpm start
 只启用 Codex，并指定自定义目录：
 
 ```bash
-corepack pnpm start -- \
+corepack pnpm start \
   --providers codex \
   --codex-dir /path/to/codex-home \
   --data-dir /path/to/app-data
@@ -159,7 +191,7 @@ corepack pnpm start -- \
 关闭文件监听：
 
 ```bash
-corepack pnpm start -- --no-watch
+corepack pnpm start --no-watch
 ```
 
 ## 验证
@@ -174,7 +206,7 @@ corepack pnpm build
 
 - 索引完全保存在本地。
 - 不读取 `auth.json`、API Key 或登录凭证。
-- 只复制恢复命令，不执行、发送、恢复或继续任何会话。
+- 只有用户点击“在终端中恢复”后才执行恢复命令；非回环监听时该接口禁用。
 - 不执行会话中的命令或工具调用。
 - 远程暴露服务前应自行增加认证和网络访问控制；默认仅监听 `localhost`。
 

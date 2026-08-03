@@ -4,7 +4,7 @@ export const messages: Record<MessageId, string> = {
   "app.name": "AI Session Search",
   "app.description": "搜索本地 AI 编程工具会话",
   "app.tagline": "本地、只读、全文检索",
-  "search.placeholder": "搜索会话内容或自定义名称…",
+  "search.placeholder": "搜索会话内容、自定义名称或 Session ID…",
   "filter.allProviders": "全部来源",
   "filter.allProjects": "全部项目",
   "filter.favoritesOnly": "仅收藏",
@@ -30,6 +30,7 @@ export const messages: Record<MessageId, string> = {
   "session.originalTitle": "原始标题：{title}",
   "session.copyId": "复制 Session ID",
   "session.copyResume": "复制恢复命令",
+  "session.openTerminal": "在终端中恢复",
   "resume.settings": "命令设置",
   "favorite.remove": "取消收藏",
   "favorite.add": "收藏",
@@ -40,12 +41,21 @@ export const messages: Record<MessageId, string> = {
   "resume.restoreDefault": "恢复默认",
   "resume.templateHelp":
     "支持 {cwd} 和 {sessionId}；只输入 yolo 也可以，会自动追加 Session ID。",
+  "terminal.type": "终端应用",
+  "terminal.custom": "自定义路径",
+  "terminal.shellPath": "Shell 路径",
+  "terminal.pathHelp":
+    "自定义路径必须是绝对路径，例如 /Applications/Ghostty.app，或支持 -e 参数的终端可执行文件。",
+  "terminal.shellPathHelp":
+    "Shell 路径必须是绝对路径并支持 -lic，例如 /bin/zsh 或 /bin/bash；交互式启动文件可提供 yolo 等别名。",
   "message.you": "你",
   "message.phase.commentary": "过程",
   "message.phase.finalAnswer": "最终回答",
   "notice.sessionIdCopied": "Session ID 已复制",
   "notice.resumeCopied": "恢复命令已复制：{command}",
   "notice.resumeSaved": "{provider} 恢复命令设置已保存",
+  "notice.commandSettingsSaved": "{provider} 命令和终端设置已保存",
+  "notice.terminalLaunched": "已在终端中打开恢复命令",
   "collection.deleteConfirm": "删除收藏夹“{name}”？会话将变为未分类。",
   "error.clipboardUnavailable": "无法访问剪贴板",
 };

@@ -2,7 +2,7 @@ export const messages = {
   "app.name": "AI Session Search",
   "app.description": "Search local AI coding agent conversations",
   "app.tagline": "Local, read-only, full-text search",
-  "search.placeholder": "Search session content or custom titles…",
+  "search.placeholder": "Search content, titles, or session IDs…",
   "filter.allProviders": "All providers",
   "filter.allProjects": "All projects",
   "filter.favoritesOnly": "Favorites only",
@@ -28,6 +28,7 @@ export const messages = {
   "session.originalTitle": "Original title: {title}",
   "session.copyId": "Copy Session ID",
   "session.copyResume": "Copy resume command",
+  "session.openTerminal": "Open in terminal",
   "resume.settings": "Command settings",
   "favorite.remove": "Remove favorite",
   "favorite.add": "Add favorite",
@@ -38,12 +39,21 @@ export const messages = {
   "resume.restoreDefault": "Restore default",
   "resume.templateHelp":
     "Supports {cwd} and {sessionId}. You can also enter only yolo; the Session ID will be appended automatically.",
+  "terminal.type": "Terminal application",
+  "terminal.custom": "Custom path",
+  "terminal.shellPath": "Shell path",
+  "terminal.pathHelp":
+    "Custom paths must be absolute, for example /Applications/Ghostty.app or an executable that supports -e.",
+  "terminal.shellPathHelp":
+    "The shell path must be absolute and support -lic, for example /bin/zsh or /bin/bash. Interactive startup files provide aliases such as yolo.",
   "message.you": "You",
   "message.phase.commentary": "Commentary",
   "message.phase.finalAnswer": "Final answer",
   "notice.sessionIdCopied": "Session ID copied",
   "notice.resumeCopied": "Resume command copied: {command}",
   "notice.resumeSaved": "{provider} resume command settings saved",
+  "notice.commandSettingsSaved": "{provider} command and terminal settings saved",
+  "notice.terminalLaunched": "Resume command opened in the terminal",
   "collection.deleteConfirm":
     "Delete collection “{name}”? Its sessions will become uncategorized.",
   "error.clipboardUnavailable": "Clipboard is unavailable",

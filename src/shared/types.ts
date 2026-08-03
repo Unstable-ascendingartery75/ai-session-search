@@ -16,6 +16,16 @@ export type ProviderId = (typeof PROVIDER_IDS)[number];
 
 export type ResumeCommandTemplates = Partial<Record<ProviderId, string>>;
 
+export const TERMINAL_IDS = ["terminal", "iterm2", "warp", "custom"] as const;
+
+export type TerminalId = (typeof TERMINAL_IDS)[number];
+
+export type TerminalSettings = {
+  terminal: TerminalId;
+  customPath: string | null;
+  shellPath: string;
+};
+
 export type ProviderDescriptor = {
   id: ProviderId;
   label: string;
