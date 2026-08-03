@@ -20,6 +20,7 @@
 - 将会话移动到收藏夹，或筛选尚未分类的会话
 - 一键复制 Session ID 或恢复命令
 - 分别自定义 Claude Code 与 Codex 的恢复命令模板
+- 根据浏览器与系统首选语言自动切换简体中文或英文界面
 - 文件变化后自动重新索引
 - 不需要 Anthropic API、OpenAI API 或云端数据库
 
@@ -64,6 +65,17 @@ Codex 扫描：
 
 `history.jsonl` 和 `session_index.jsonl` 不作为会话发现来源；Codex 的
 `session_index.jsonl` 只用于补充已有会话的标题。
+
+## 国际化
+
+应用使用 Lingui 管理界面翻译，并根据浏览器提供的系统首选语言自动选择语言：
+
+- `zh-*`：简体中文
+- `en-*`：英文
+- 其他语言：回退为英文
+
+语言检测与翻译目录位于 `src/client/i18n/`。新增语言时需要增加对应 Catalog，并在
+`localeDetection.ts` 中注册语言标签映射。
 
 ## 本地开发
 

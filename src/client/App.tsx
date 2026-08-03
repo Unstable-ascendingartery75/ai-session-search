@@ -1,3 +1,4 @@
+import { useLingui } from "@lingui/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   CollectionSummary,
@@ -12,6 +13,7 @@ import {
   DEFAULT_RESUME_COMMAND_TEMPLATES,
   renderResumeCommand,
 } from "../shared/resumeCommand.ts";
+import type { Translator } from "./i18n/index.ts";
 
 type Project = { provider: ProviderId; projectPath: string; count: number };
 type SessionDetail = { session: SessionSummary; messages: NormalizedMessage[] };
@@ -37,15 +39,19 @@ const providerLabel = (provider: ProviderId): string =>
 const isSearchResult = (item: SessionSummary | SearchResult): item is SearchResult =>
   "messageIndex" in item;
 
-const formatDate = (value: string): string => {
+const formatDate = (value: string, locale: string): string => {
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "" : date.toLocaleString();
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleString(locale);
 };
 
-const copyText = async (value: string): Promise<void> => {
+const copyText = async (value: string, unavailableMessage: string): Promise<void> => {
   if (navigator.clipboard?.writeText !== undefined) {
-    await navigator.clipboard.writeText(value);
-    return;
+    try {
+      await navigator.clipboard.writeText(value);
+      return;
+    } catch {
+      // Fall back to document.execCommand for browsers that block the Clipboard API.
+    }
   }
   const textarea = document.createElement("textarea");
   textarea.value = value;
@@ -55,10 +61,13 @@ const copyText = async (value: string): Promise<void> => {
   textarea.select();
   const copied = document.execCommand("copy");
   textarea.remove();
-  if (!copied) throw new Error("Clipboard is unavailable");
+  if (!copied) throw new Error(unavailableMessage);
 };
 
 export const App = () => {
+  const { i18n } = useLingui();
+  const t: Translator = (id, values) => i18n._(id, values);
+  const locale = i18n.locale || "en";
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [provider, setProvider] = useState<ProviderId | "all">("all");
@@ -90,6 +99,14 @@ export const App = () => {
     const timer = window.setTimeout(() => setDebouncedQuery(query.trim()), 220);
     return () => window.clearTimeout(timer);
   }, [query]);
+
+  useEffect(() => {
+    document.documentElement.lang = locale;
+    document.title = t("app.name");
+    document
+      .querySelector('meta[name="description"]')
+      ?.setAttribute("content", t("app.description"));
+  }, [locale]);
 
   useEffect(() => {
     jsonRequest<{ templates: ResumeCommandTemplates }>("/api/settings/resume-commands")
@@ -204,8 +221,8 @@ export const App = () => {
   const copySessionId = async (): Promise<void> => {
     if (selected === null) return;
     try {
-      await copyText(selected.session.sourceSessionId);
-      setNotice("Session ID 已复制");
+      await copyText(selected.session.sourceSessionId, t("error.clipboardUnavailable"));
+      setNotice(t("notice.sessionIdCopied"));
     } catch (caught) {
       setError(String(caught));
     }
@@ -218,8 +235,8 @@ export const App = () => {
       cwd: selected.session.projectPath,
     });
     try {
-      await copyText(command);
-      setNotice(`恢复命令已复制：${command}`);
+      await copyText(command, t("error.clipboardUnavailable"));
+      setNotice(t("notice.resumeCopied", { command }));
     } catch (caught) {
       setError(String(caught));
     }
@@ -238,7 +255,9 @@ export const App = () => {
       );
       setResumeCommandTemplates(response.templates);
       setEditingResumeCommand(false);
-      setNotice(`${providerLabel(selected.session.provider)} 恢复命令设置已保存`);
+      setNotice(
+        t("notice.resumeSaved", { provider: providerLabel(selected.session.provider) }),
+      );
     } catch (caught) {
       setError(String(caught));
     }
@@ -276,7 +295,10 @@ export const App = () => {
     const id = Number.parseInt(collectionFilter, 10);
     if (!Number.isInteger(id)) return;
     const collection = collections.find((item) => item.id === id);
-    if (collection === undefined || !window.confirm(`删除收藏夹“${collection.name}”？会话将变为未分类。`)) {
+    if (
+      collection === undefined ||
+      !window.confirm(t("collection.deleteConfirm", { name: collection.name }))
+    ) {
       return;
     }
     try {
@@ -306,7 +328,7 @@ export const App = () => {
           <div className="brand-mark">⌕</div>
           <div>
             <h1>AI Session Search</h1>
-            <p>本地、只读、全文检索</p>
+            <p>{t("app.tagline")}</p>
           </div>
         </header>
 
@@ -315,7 +337,7 @@ export const App = () => {
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="搜索会话内容或自定义名称…"
+            placeholder={t("search.placeholder")}
             autoFocus
           />
           {query !== "" && <button onClick={() => setQuery("")}>×</button>}
@@ -323,7 +345,7 @@ export const App = () => {
 
         <div className="filters">
           <select value={provider} onChange={(event) => setProvider(event.target.value as ProviderId | "all") }>
-            <option value="all">全部来源</option>
+            <option value="all">{t("filter.allProviders")}</option>
             <option value="claude">Claude Code</option>
             <option value="codex">Codex</option>
           </select>
@@ -332,7 +354,7 @@ export const App = () => {
             value={projectPath}
             onChange={(event) => setProjectPath(event.target.value)}
           >
-            <option value="">全部项目</option>
+            <option value="">{t("filter.allProjects")}</option>
             {visibleProjects.map((project) => (
               <option key={`${project.provider}:${project.projectPath}`} value={project.projectPath}>
                 {project.projectPath} ({project.count})
@@ -343,13 +365,13 @@ export const App = () => {
             className={favoritesOnly ? "filter-button active" : "filter-button"}
             onClick={() => setFavoritesOnly((value) => !value)}
           >
-            ★ 仅收藏
+            ★ {t("filter.favoritesOnly")}
           </button>
           <button
             className={renamedOnly ? "filter-button active" : "filter-button"}
             onClick={() => setRenamedOnly((value) => !value)}
           >
-            ✎ 已重命名
+            ✎ {t("filter.renamedOnly")}
           </button>
           <select
             className="collection-filter"
@@ -359,8 +381,8 @@ export const App = () => {
               setCollectionEditor(null);
             }}
           >
-            <option value="all">全部收藏夹</option>
-            <option value="unassigned">未分类</option>
+            <option value="all">{t("filter.allCollections")}</option>
+            <option value="unassigned">{t("collection.unassigned")}</option>
             {collections.map((collection) => (
               <option key={collection.id} value={collection.id}>
                 {collection.name} ({collection.sessionCount})
@@ -374,7 +396,7 @@ export const App = () => {
                 setCollectionEditor("create");
               }}
             >
-              ＋新建收藏夹
+              {t("collection.new")}
             </button>
             {Number.isInteger(Number.parseInt(collectionFilter, 10)) && (
               <>
@@ -387,10 +409,10 @@ export const App = () => {
                     setCollectionEditor("rename");
                   }}
                 >
-                  重命名
+                  {t("common.rename")}
                 </button>
                 <button className="danger" onClick={() => void deleteSelectedCollection()}>
-                  删除
+                  {t("common.delete")}
                 </button>
               </>
             )}
@@ -404,18 +426,26 @@ export const App = () => {
                   if (event.key === "Enter") void saveCollection();
                   if (event.key === "Escape") setCollectionEditor(null);
                 }}
-                placeholder={collectionEditor === "create" ? "新收藏夹名称" : "收藏夹名称"}
+                placeholder={
+                  collectionEditor === "create"
+                    ? t("collection.newPlaceholder")
+                    : t("collection.namePlaceholder")
+                }
                 maxLength={100}
                 autoFocus
               />
-              <button onClick={() => void saveCollection()}>保存</button>
-              <button onClick={() => setCollectionEditor(null)}>取消</button>
+              <button onClick={() => void saveCollection()}>{t("common.save")}</button>
+              <button onClick={() => setCollectionEditor(null)}>{t("common.cancel")}</button>
             </div>
           )}
         </div>
 
         <div className="result-caption">
-          <span>{debouncedQuery === "" ? "最近会话" : `“${debouncedQuery}” 的结果`}</span>
+          <span>
+            {debouncedQuery === ""
+              ? t("sessions.recent")
+              : t("sessions.searchResults", { query: debouncedQuery })}
+          </span>
           <span>{visibleItems.length}</span>
         </div>
 
@@ -434,19 +464,25 @@ export const App = () => {
                   {item.favorite && <span className="favorite-star">★</span>}
                 </div>
                 {item.collectionId !== null && (
-                  <span className="collection-badge">▰ {collectionNames.get(item.collectionId) ?? "收藏夹"}</span>
+                  <span className="collection-badge">
+                    ▰ {collectionNames.get(item.collectionId) ?? t("collection.fallback")}
+                  </span>
                 )}
-                {item.customTitle !== null && <p className="original-title">原始：{item.originalTitle}</p>}
+                {item.customTitle !== null && (
+                  <p className="original-title">
+                    {t("session.original", { title: item.originalTitle })}
+                  </p>
+                )}
                 {result !== null && <p className="snippet">{result.snippet}</p>}
                 <div className="session-meta">
                   <span>{providerLabel(item.provider)}</span>
-                  <time>{formatDate(item.updatedAt)}</time>
+                  <time>{formatDate(item.updatedAt, locale)}</time>
                 </div>
               </button>
             );
           })}
           {!loading && visibleItems.length === 0 && (
-            <div className="empty-state">没有找到匹配的会话</div>
+            <div className="empty-state">{t("sessions.empty")}</div>
           )}
         </div>
 
@@ -461,7 +497,7 @@ export const App = () => {
                 .finally(() => setLoading(false));
             }}
           >
-            重新扫描
+            {t("sessions.rescan")}
           </button>
         </footer>
       </aside>
@@ -470,8 +506,8 @@ export const App = () => {
         {selected === null ? (
           <div className="welcome">
             <div className="welcome-icon">⌕</div>
-            <h2>搜索你的本地 AI 编程会话</h2>
-            <p>自动发现 Claude Code 与 Codex 会话。所有索引和收藏信息仅保存在本机。</p>
+            <h2>{t("welcome.title")}</h2>
+            <p>{t("welcome.description")}</p>
             <div className="provider-status">
               {status?.providers.map((item) => (
                 <div key={item.provider}>
@@ -501,22 +537,22 @@ export const App = () => {
                       maxLength={200}
                       autoFocus
                     />
-                    <button onClick={() => void saveTitle()}>保存</button>
-                    <button onClick={() => setEditingTitle(false)}>取消</button>
+                    <button onClick={() => void saveTitle()}>{t("common.save")}</button>
+                    <button onClick={() => setEditingTitle(false)}>{t("common.cancel")}</button>
                   </div>
                 ) : (
                   <h2>{selected.session.displayTitle}</h2>
                 )}
                 {selected.session.customTitle !== null && !editingTitle && (
-                  <p>原始标题：{selected.session.originalTitle}</p>
+                  <p>{t("session.originalTitle", { title: selected.session.originalTitle })}</p>
                 )}
               </div>
               <div className="header-actions">
-                <button title="Copy Session ID" onClick={() => void copySessionId()}>
-                  复制 Session ID
+                <button title={t("session.copyId")} onClick={() => void copySessionId()}>
+                  {t("session.copyId")}
                 </button>
-                <button title="Copy Resume Command" onClick={() => void copyResumeCommand()}>
-                  复制恢复命令
+                <button title={t("session.copyResume")} onClick={() => void copyResumeCommand()}>
+                  {t("session.copyResume")}
                 </button>
                 <button
                   onClick={() => {
@@ -526,10 +562,12 @@ export const App = () => {
                     setEditingResumeCommand((value) => !value);
                   }}
                 >
-                  命令设置
+                  {t("resume.settings")}
                 </button>
                 <button
-                  title={selected.session.favorite ? "取消收藏" : "收藏"}
+                  title={
+                    selected.session.favorite ? t("favorite.remove") : t("favorite.add")
+                  }
                   className={selected.session.favorite ? "star-button active" : "star-button"}
                   onClick={() => void updateMetadata(selected.session, { favorite: !selected.session.favorite })}
                 >
@@ -541,15 +579,15 @@ export const App = () => {
                     setEditingTitle(true);
                   }}
                 >
-                  重命名
+                  {t("common.rename")}
                 </button>
               </div>
               <div className="conversation-info">
-                <code>{selected.session.projectPath ?? "未知项目"}</code>
-                <span>{selected.session.messageCount} 条消息</span>
-                <time>{formatDate(selected.session.updatedAt)}</time>
+                <code>{selected.session.projectPath ?? t("session.unknownProject")}</code>
+                <span>{t("session.messageCount", { count: selected.session.messageCount })}</span>
+                <time>{formatDate(selected.session.updatedAt, locale)}</time>
                 <label className="collection-assignment">
-                  收藏夹
+                  {t("collection.label")}
                   <select
                     value={selected.session.collectionId ?? ""}
                     onChange={(event) => {
@@ -559,7 +597,7 @@ export const App = () => {
                       });
                     }}
                   >
-                    <option value="">未分类</option>
+                    <option value="">{t("collection.unassigned")}</option>
                     {collections.map((collection) => (
                       <option key={collection.id} value={collection.id}>
                         {collection.name}
@@ -571,7 +609,9 @@ export const App = () => {
               {editingResumeCommand && (
                 <div className="resume-command-editor">
                   <label htmlFor="resume-command-template">
-                    {providerLabel(selected.session.provider)} 恢复命令模板
+                    {t("resume.template", {
+                      provider: providerLabel(selected.session.provider),
+                    })}
                   </label>
                   <div className="resume-command-form">
                     <input
@@ -585,7 +625,7 @@ export const App = () => {
                       maxLength={500}
                       autoFocus
                     />
-                    <button onClick={() => void saveResumeCommand()}>保存</button>
+                    <button onClick={() => void saveResumeCommand()}>{t("common.save")}</button>
                     <button
                       onClick={() =>
                         setResumeCommandDraft(
@@ -593,13 +633,17 @@ export const App = () => {
                         )
                       }
                     >
-                      恢复默认
+                      {t("resume.restoreDefault")}
                     </button>
-                    <button onClick={() => setEditingResumeCommand(false)}>取消</button>
+                    <button onClick={() => setEditingResumeCommand(false)}>
+                      {t("common.cancel")}
+                    </button>
                   </div>
                   <p>
-                    支持 <code>{"{cwd}"}</code> 和 <code>{"{sessionId}"}</code>；只输入
-                    <code> yolo</code> 也可以，会自动追加 Session ID。
+                    {t("resume.templateHelp", {
+                      cwd: "{cwd}",
+                      sessionId: "{sessionId}",
+                    })}
                   </p>
                   {resumeCommandDraft.trim() !== "" && (
                     <code className="command-preview">
@@ -624,9 +668,21 @@ export const App = () => {
                   className={`message ${message.role} ${selectedMessageIndex === message.index ? "matched" : ""}`}
                 >
                   <div className="message-label">
-                    <strong>{message.role === "user" ? "你" : selected.session.provider === "codex" ? "Codex" : "Claude"}</strong>
-                    {message.phase !== undefined && <span>{message.phase}</span>}
-                    <time>{formatDate(message.timestamp)}</time>
+                    <strong>
+                      {message.role === "user"
+                        ? t("message.you")
+                        : selected.session.provider === "codex"
+                          ? "Codex"
+                          : "Claude"}
+                    </strong>
+                    {message.phase !== undefined && (
+                      <span>
+                        {message.phase === "commentary"
+                          ? t("message.phase.commentary")
+                          : t("message.phase.finalAnswer")}
+                      </span>
+                    )}
+                    <time>{formatDate(message.timestamp, locale)}</time>
                   </div>
                   <pre>{message.content}</pre>
                 </article>
