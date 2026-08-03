@@ -28,6 +28,7 @@ The Windows build is portable: extract the ZIP and run `ai-session-search.exe`; 
 included.
 **Open in terminal** supports macOS and Windows. Windows Terminal opens a new tab in the most
 recent window and falls back to PowerShell when `wt.exe` is unavailable.
+The Windows package requires 64-bit Windows 10 or Windows 11; Windows 7/8/8.1 are not supported.
 
 ## Highlights
 
@@ -39,6 +40,7 @@ recent window and falls back to PowerShell when `wt.exe` is unavailable.
 - Windows integration with Windows Terminal, PowerShell, Command Prompt, and custom executables
 - Resizable sidebar with persisted width
 - Background incremental indexing and filesystem watching
+- Shared web/desktop session-source settings with custom paths, enable/disable controls, and live rescanning
 - Automatic English/Simplified Chinese UI; no API key or cloud database required
 
 AI Session Search never modifies source conversations. Titles, collections, settings, and indexes
@@ -60,8 +62,12 @@ are written only to its own SQLite database.
 | `pi` | Pi | `~/.pi` |
 | `kimi` | Kimi Code | `~/.kimi-code` |
 
-Path precedence is: CLI option → `AI_SESSION_*` environment variable → client-native environment
-variable → platform default. User home paths are never hardcoded.
+Open **Session sources** in either the web or desktop app to change a client directory, restore its
+automatic path, or enable/disable a client. Settings are stored in the app database and trigger a
+live rescan without restarting. Paths must be absolute.
+
+Path precedence is: saved UI setting → CLI option → `AI_SESSION_*` environment variable →
+client-native environment variable → platform default. User home paths are never hardcoded.
 
 ## CLI / Web version
 

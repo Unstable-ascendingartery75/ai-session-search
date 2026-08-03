@@ -5,6 +5,7 @@ import type {
   NormalizedMessage,
   ProviderDescriptor,
   ProviderId,
+  ProviderSourceSetting,
   ProviderStatus,
   ResumeCommandTemplates,
   RuntimePlatform,
@@ -40,6 +41,7 @@ type AppStatus = {
   sync: SyncProgress;
   runtimePlatform: RuntimePlatform;
 };
+type ProviderSourceDraft = { enabled: boolean; home: string };
 
 const GITHUB_URL = "https://github.com/lililib/ai-session-search";
 
@@ -135,6 +137,10 @@ export const App = () => {
   const [terminalDraft, setTerminalDraft] = useState<TerminalId>("terminal");
   const [customTerminalPathDraft, setCustomTerminalPathDraft] = useState("");
   const [shellPathDraft, setShellPathDraft] = useState("/bin/zsh");
+  const [providerSourceSettings, setProviderSourceSettings] = useState<ProviderSourceSetting[]>([]);
+  const [providerSourceDrafts, setProviderSourceDrafts] = useState<Partial<Record<ProviderId, ProviderSourceDraft>>>({});
+  const [showProviderSources, setShowProviderSources] = useState(false);
+  const [savingProviderSource, setSavingProviderSource] = useState<ProviderId | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -151,6 +157,16 @@ export const App = () => {
     runtimePlatform,
     terminalSettings.shellPath,
   );
+
+  const applyProviderSourceSettings = (settings: ProviderSourceSetting[]): void => {
+    setProviderSourceSettings(settings);
+    setProviderSourceDrafts(Object.fromEntries(
+      settings.map((setting) => [setting.provider, {
+        enabled: setting.enabled,
+        home: setting.home,
+      }]),
+    ));
+  };
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedQuery(query.trim()), 220);
@@ -174,6 +190,9 @@ export const App = () => {
       .catch((caught: unknown) => setError(String(caught)));
     jsonRequest<{ settings: TerminalSettings }>("/api/settings/terminal")
       .then((data) => setTerminalSettings(data.settings))
+      .catch((caught: unknown) => setError(String(caught)));
+    jsonRequest<{ settings: ProviderSourceSetting[] }>("/api/settings/providers")
+      .then((data) => applyProviderSourceSettings(data.settings))
       .catch((caught: unknown) => setError(String(caught)));
   }, []);
 
@@ -392,6 +411,41 @@ export const App = () => {
       );
     } catch (caught) {
       setError(String(caught));
+    }
+  };
+
+  const saveProviderSource = async (setting: ProviderSourceSetting): Promise<void> => {
+    const draft = providerSourceDrafts[setting.provider];
+    if (draft === undefined || draft.home.trim() === "") return;
+    setSavingProviderSource(setting.provider);
+    setLoading(true);
+    try {
+      const normalizedHome = draft.home.trim();
+      const response = await jsonRequest<{ settings: ProviderSourceSetting[] }>(
+        `/api/settings/providers/${setting.provider}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            enabled: draft.enabled,
+            home: normalizedHome === setting.defaultHome ? null : normalizedHome,
+          }),
+        },
+      );
+      applyProviderSourceSettings(response.settings);
+      if (!draft.enabled && selected?.session.provider === setting.provider) setSelected(null);
+      await refreshSidebar();
+      if (debouncedQuery !== "") {
+        const suffix = queryString({ q: debouncedQuery, ...filters });
+        const data = await jsonRequest<{ results: SearchResult[] }>(`/api/search?${suffix}`);
+        setResults(data.results);
+      }
+      setNotice(t("notice.providerSourceSaved", { provider: providerLabel(setting.provider) }));
+    } catch (caught) {
+      setError(String(caught));
+    } finally {
+      setSavingProviderSource(null);
+      setLoading(false);
     }
   };
 
@@ -698,6 +752,11 @@ export const App = () => {
               <span key={item.provider}>{providerLabel(item.provider)} {status.counts[item.provider]}</span>
             ))}
           <button
+            onClick={() => setShowProviderSources(true)}
+          >
+            {t("sources.open")}
+          </button>
+          <button
             disabled={syncProgress?.running === true}
             onClick={() => {
               setLoading(true);
@@ -989,6 +1048,99 @@ export const App = () => {
           </>
         )}
       </main>
+
+      {showProviderSources && (
+        <div className="modal-backdrop" onMouseDown={() => setShowProviderSources(false)}>
+          <section
+            className="source-settings-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="source-settings-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <header>
+              <div>
+                <h2 id="source-settings-title">{t("sources.title")}</h2>
+                <p>{t("sources.description")}</p>
+              </div>
+              <button
+                className="dialog-close"
+                onClick={() => setShowProviderSources(false)}
+                aria-label={t("common.close")}
+              >
+                ×
+              </button>
+            </header>
+            <div className="source-settings-list">
+              {providerSourceSettings.map((setting) => {
+                const draft = providerSourceDrafts[setting.provider] ?? {
+                  enabled: setting.enabled,
+                  home: setting.home,
+                };
+                const saving = savingProviderSource === setting.provider;
+                const changed = draft.enabled !== setting.enabled || draft.home.trim() !== setting.home;
+                return (
+                  <article className="source-setting" key={setting.provider}>
+                    <div className="source-setting-heading">
+                      <span className="provider-dot" style={{ background: providerColor(setting.provider) }} />
+                      <strong>{providerLabel(setting.provider)}</strong>
+                      <code>{setting.provider}</code>
+                      <label className="source-enabled">
+                        <input
+                          type="checkbox"
+                          checked={draft.enabled}
+                          onChange={(event) => setProviderSourceDrafts((current) => ({
+                            ...current,
+                            [setting.provider]: { ...draft, enabled: event.target.checked },
+                          }))}
+                        />
+                        {t("sources.enabled")}
+                      </label>
+                    </div>
+                    <div className="source-path-row">
+                      <input
+                        value={draft.home}
+                        onChange={(event) => setProviderSourceDrafts((current) => ({
+                          ...current,
+                          [setting.provider]: { ...draft, home: event.target.value },
+                        }))}
+                        placeholder={setting.defaultHome}
+                        spellCheck={false}
+                      />
+                      <button
+                        onClick={() => setProviderSourceDrafts((current) => ({
+                          ...current,
+                          [setting.provider]: { ...draft, home: setting.defaultHome },
+                        }))}
+                        disabled={draft.home === setting.defaultHome}
+                      >
+                        {t("sources.restoreDefault")}
+                      </button>
+                      <button
+                        className="primary"
+                        onClick={() => void saveProviderSource(setting)}
+                        disabled={!changed || draft.home.trim() === "" || saving}
+                      >
+                        {saving ? t("sources.saving") : t("common.save")}
+                      </button>
+                    </div>
+                    <div className="source-setting-meta">
+                      <span className={setting.detected ? "detected" : "missing"}>
+                        {setting.detected ? t("sources.detected") : t("sources.notDetected")}
+                      </span>
+                      <span>{t("sources.sessionCount", { count: setting.sessionCount })}</span>
+                      {setting.customized && <span>{t("sources.customized")}</span>}
+                      <code title={setting.defaultHome}>
+                        {t("sources.defaultPath", { path: setting.defaultHome })}
+                      </code>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </section>
+        </div>
+      )}
 
       {loading && <div className="loading-bar" />}
       {error !== null && (

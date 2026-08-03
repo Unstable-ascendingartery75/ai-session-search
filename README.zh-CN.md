@@ -25,6 +25,7 @@ SQLite FTS5 trigram 索引搜索自然语言、代码、路径、错误信息和
 便携版：解压 ZIP 后运行 `ai-session-search.exe`，无需安装。“在终端中恢复”支持 macOS
 和 Windows；Windows Terminal 会在最近使用的窗口中新建标签页，找不到 `wt.exe` 时回退
 到 PowerShell。
+Windows 包要求 64 位 Windows 10 或 Windows 11，不支持 Windows 7/8/8.1。
 
 ## 主要功能
 
@@ -36,6 +37,7 @@ SQLite FTS5 trigram 索引搜索自然语言、代码、路径、错误信息和
 - Windows 支持 Windows Terminal、PowerShell、命令提示符和自定义可执行文件
 - 侧边栏可拖拽调整宽度，并记住用户设置
 - 后台增量索引和文件变化监听
+- Web/桌面端共用会话来源设置，支持自定义路径、启用/禁用和即时重新扫描
 - 简体中文/英文界面自动切换；无需 API Key 或云端数据库
 
 本项目不会修改任何来源会话。名称、收藏夹、设置和索引只写入自己的 SQLite 数据库。
@@ -56,8 +58,11 @@ SQLite FTS5 trigram 索引搜索自然语言、代码、路径、错误信息和
 | `pi` | Pi | `~/.pi` |
 | `kimi` | Kimi Code | `~/.kimi-code` |
 
-路径优先级为：CLI 参数 → `AI_SESSION_*` 环境变量 → 客户端原生环境变量 → 平台默认目录。
-因此不会写死用户主目录。
+Web 和桌面端都可以打开“会话来源”，修改客户端目录、恢复自动路径或启用/禁用客户端。
+设置保存在应用自己的数据库中，保存后即时重新扫描，无需重启；自定义路径必须是绝对路径。
+
+路径优先级为：界面保存设置 → CLI 参数 → `AI_SESSION_*` 环境变量 → 客户端原生环境变量
+→ 平台默认目录。因此不会写死用户主目录。
 
 ## CLI / Web 版本
 

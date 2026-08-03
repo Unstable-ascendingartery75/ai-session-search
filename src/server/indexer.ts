@@ -15,7 +15,7 @@ export type SyncResult = {
 
 export class SessionIndexer {
   readonly #database: SearchDatabase;
-  readonly #providers: ConversationProvider[];
+  #providers: ConversationProvider[];
   readonly #watchers: FSWatcher[] = [];
   readonly #debounceTimers = new Map<ProviderId, NodeJS.Timeout>();
   #syncQueue: Promise<unknown> = Promise.resolve();
@@ -115,7 +115,8 @@ export class SessionIndexer {
     const detected = (await Promise.all(provider.sessionRoots.map(pathExists))).some(Boolean);
     if (!detected) {
       onProgress?.(0, 0);
-      return { provider: providerId, discovered: 0, indexed: 0, unchanged: 0, removed: 0, errors: 0 };
+      const removed = this.#database.removeMissingFiles(provider.id, new Set());
+      return { provider: providerId, discovered: 0, indexed: 0, unchanged: 0, removed, errors: 0 };
     }
 
     const files = await provider.discover();
@@ -179,6 +180,7 @@ export class SessionIndexer {
 
   async startWatching(): Promise<void> {
     if (this.#closed) return;
+    this.#stopWatching();
     for (const provider of this.#providers) {
       for (const root of provider.sessionRoots) {
         if (!(await pathExists(root))) continue;
@@ -193,6 +195,24 @@ export class SessionIndexer {
         }
       }
     }
+  }
+
+  async reconfigure(providers: ConversationProvider[], watch: boolean): Promise<SyncResult[]> {
+    if (this.#closed) throw new Error("Session indexer is closed");
+    for (const timer of this.#debounceTimers.values()) clearTimeout(timer);
+    this.#debounceTimers.clear();
+    await this.#syncQueue;
+    if (this.#syncAllPromise !== null) await this.#syncAllPromise;
+    this.#stopWatching();
+    this.#providers = providers;
+    const results = await this.syncAll();
+    if (watch) await this.startWatching();
+    return results;
+  }
+
+  #stopWatching(): void {
+    for (const watcher of this.#watchers) watcher.close();
+    this.#watchers.length = 0;
   }
 
   #scheduleSync(provider: ProviderId): void {
@@ -213,7 +233,6 @@ export class SessionIndexer {
     this.#closed = true;
     for (const timer of this.#debounceTimers.values()) clearTimeout(timer);
     this.#debounceTimers.clear();
-    for (const watcher of this.#watchers) watcher.close();
-    this.#watchers.length = 0;
+    this.#stopWatching();
   }
 }

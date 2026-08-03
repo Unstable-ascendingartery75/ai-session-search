@@ -2,6 +2,7 @@ import { mkdtemp, mkdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
+import type { ParsedSession } from "../shared/types.ts";
 import { SearchDatabase } from "./database.ts";
 import { SessionIndexer } from "./indexer.ts";
 import { createCodexProvider } from "./providers/codex.ts";
@@ -14,6 +15,14 @@ const makeTempDirectory = async (): Promise<string> => {
   tempDirectories.push(path);
   return path;
 };
+
+const emptyCodexProvider = (home: string): ConversationProvider => ({
+  id: "codex",
+  home,
+  sessionRoots: [join(home, "sessions")],
+  discover: async () => [],
+  parse: async () => null,
+});
 
 afterEach(async () => {
   for (const path of tempDirectories.splice(0)) await rm(path, { recursive: true, force: true });
@@ -247,6 +256,50 @@ describe("session indexer", () => {
       expect(result.unchanged).toBe(0);
       expect(database.search({ query: "old parsed content" })).toHaveLength(0);
       expect(database.search({ query: "new parsed content" })).toHaveLength(1);
+    } finally {
+      indexer.close();
+      database.close();
+    }
+  });
+
+  test("switches provider homes without restarting the server", async () => {
+    const root = await makeTempDirectory();
+    const database = new SearchDatabase(join(root, "search.db"));
+    const indexer = new SessionIndexer(database, [emptyCodexProvider(join(root, "first"))]);
+    try {
+      await indexer.reconfigure([emptyCodexProvider(join(root, "second"))], false);
+      expect(await indexer.status()).toMatchObject([{ home: join(root, "second") }]);
+    } finally {
+      indexer.close();
+      database.close();
+    }
+  });
+
+  test("removes stale indexed sessions when the configured path is unavailable", async () => {
+    const root = await makeTempDirectory();
+    const database = new SearchDatabase(join(root, "search.db"));
+    const session: ParsedSession = {
+      sessionKey: "codex:stale",
+      sourceSessionId: "stale",
+      provider: "codex",
+      filePath: join(root, "old", "session.jsonl"),
+      projectPath: null,
+      originalTitle: "Stale session",
+      startedAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      messages: [],
+    };
+    database.upsertSession(session, {
+      provider: "codex",
+      path: session.filePath,
+      mtimeMs: 1,
+      size: 1,
+    });
+    const indexer = new SessionIndexer(database, [emptyCodexProvider(join(root, "missing"))]);
+    try {
+      const result = await indexer.syncProvider("codex");
+      expect(result.removed).toBe(1);
+      expect(database.getSession(session.sessionKey)).toBeNull();
     } finally {
       indexer.close();
       database.close();

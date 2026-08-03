@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import type { ParsedSession } from "../shared/types.ts";
+import { PROVIDER_IDS, type ParsedSession, type ProviderId } from "../shared/types.ts";
 import { createApp } from "./app.ts";
 import type { AppConfig } from "./config.ts";
 import { SearchDatabase } from "./database.ts";
@@ -43,20 +43,80 @@ const createFixture = async (hostname = "127.0.0.1") => {
     port: 3411,
     hostname,
     dataDir: directory,
-    providerHomes: {} as AppConfig["providerHomes"],
+    providerHomes: Object.fromEntries(
+      PROVIDER_IDS.map((provider) => [provider, `/defaults/${provider}`]),
+    ) as Record<ProviderId, string>,
     providers: new Set(["codex"]),
     watch: true,
   } satisfies AppConfig;
   const terminalLauncher = { launch: vi.fn(async () => undefined) };
+  const indexer = {
+    status: vi.fn(async () => [{
+      provider: "codex" as const,
+      enabled: true,
+      home: "/defaults/codex",
+      detected: true,
+      sessionRoots: ["/defaults/codex/sessions"],
+    }]),
+    syncProgress: vi.fn(() => ({
+      running: false,
+      currentProvider: null,
+      completedProviders: 0,
+      totalProviders: 1,
+      processedFiles: 0,
+      totalFiles: 0,
+    })),
+    reconfigure: vi.fn(async () => []),
+  };
   const app = createApp({
     database,
-    indexer: {} as SessionIndexer,
+    indexer: indexer as unknown as SessionIndexer,
     config,
     terminalLauncher,
     runtimePlatform: "darwin",
   });
-  return { app, database, terminalLauncher };
+  return { app, database, terminalLauncher, indexer };
 };
+
+describe("provider source settings API", () => {
+  test("persists an absolute provider home and reconfigures the live indexer", async () => {
+    const { app, indexer } = await createFixture();
+    const response = await app.request("http://127.0.0.1:3411/api/settings/providers/codex", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: true, home: "/archives/codex" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(indexer.reconfigure).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ id: "codex", home: "/archives/codex" })]),
+      true,
+    );
+    expect(await response.json()).toMatchObject({
+      settings: expect.arrayContaining([
+        expect.objectContaining({
+          provider: "codex",
+          enabled: true,
+          home: "/archives/codex",
+          defaultHome: "/defaults/codex",
+          customized: true,
+        }),
+      ]),
+    });
+  });
+
+  test("rejects relative provider homes", async () => {
+    const { app, indexer } = await createFixture();
+    const response = await app.request("http://127.0.0.1:3411/api/settings/providers/codex", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: true, home: "relative/path" }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(indexer.reconfigure).not.toHaveBeenCalled();
+  });
+});
 
 describe("terminal launch API", () => {
   test("stores terminal settings and launches a server-rendered resume command", async () => {

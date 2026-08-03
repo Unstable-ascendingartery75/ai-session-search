@@ -103,6 +103,12 @@ export type ProviderStatus = {
   sessionRoots: string[];
 };
 
+export type ProviderSourceSetting = ProviderStatus & {
+  defaultHome: string;
+  customized: boolean;
+  sessionCount: number;
+};
+
 export type SyncProgress = {
   running: boolean;
   currentProvider: ProviderId | null;

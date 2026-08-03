@@ -28,7 +28,17 @@ export const startServer = async (
 ): Promise<ServerRuntime> => {
   await mkdir(config.dataDir, { recursive: true });
   const database = new SearchDatabase(join(config.dataDir, "search.db"));
-  const providers = options.providers ?? createEnabledProviders(config.providers, config.providerHomes);
+  const sourceSettings = database.getProviderSourceSettings(config.providerHomes, config.providers);
+  const configuredHomes = Object.fromEntries(
+    sourceSettings.map((setting) => [setting.provider, setting.home]),
+  ) as AppConfig["providerHomes"];
+  const configuredProviders = new Set(
+    sourceSettings.filter((setting) => setting.enabled).map((setting) => setting.provider),
+  );
+  for (const setting of sourceSettings) {
+    if (!setting.enabled) database.removeMissingFiles(setting.provider, new Set());
+  }
+  const providers = options.providers ?? createEnabledProviders(configuredProviders, configuredHomes);
   const indexer = new SessionIndexer(database, providers);
   const terminalLauncher = new TerminalLauncher(config.dataDir);
 

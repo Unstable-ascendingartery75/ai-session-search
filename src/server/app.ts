@@ -1,15 +1,16 @@
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono, type Context } from "hono";
 import { z } from "zod";
-import { TERMINAL_IDS, type ProviderId } from "../shared/types.ts";
+import { TERMINAL_IDS, type ProviderId, type ProviderSourceSetting } from "../shared/types.ts";
 import { isProviderId, PROVIDER_DESCRIPTORS } from "../shared/providers.ts";
 import { renderResumeCommand } from "../shared/resumeCommand.ts";
 import { commandDialectForTerminal, normalizeRuntimePlatform } from "../shared/terminal.ts";
 import type { AppConfig } from "./config.ts";
 import { SearchDatabase } from "./database.ts";
 import { SessionIndexer } from "./indexer.ts";
+import { createEnabledProviders } from "./providers/registry.ts";
 import type { TerminalLauncher } from "./terminalLauncher.ts";
 
 const providerValue = (value: string | undefined): ProviderId | undefined =>
@@ -50,6 +51,10 @@ const terminalSettingsSchema = z
     (value) => value.terminal !== "custom" || (value.customPath?.length ?? 0) > 0,
     { message: "Custom terminal path is required" },
   );
+const providerSourceSchema = z.object({
+  enabled: z.boolean(),
+  home: z.string().trim().min(1).max(2000).nullable(),
+});
 
 const isLoopbackHostname = (hostname: string): boolean =>
   ["localhost", "127.0.0.1", "::1", "[::1]"].includes(hostname.toLocaleLowerCase());
@@ -79,9 +84,54 @@ export const createApp = (options: {
   const runtimePlatform = options.runtimePlatform ?? process.platform;
   const app = new Hono();
 
-  app.get("/api/providers", (context) => context.json({
-    providers: PROVIDER_DESCRIPTORS.filter((provider) => config.providers.has(provider.id)),
-  }));
+  app.get("/api/providers", (context) => context.json({ providers: PROVIDER_DESCRIPTORS }));
+
+  const listProviderSourceSettings = async (): Promise<ProviderSourceSetting[]> => {
+    const preferences = database.getProviderSourceSettings(config.providerHomes, config.providers);
+    const statuses = new Map((await indexer.status()).map((status) => [status.provider, status]));
+    const counts = database.countSessions();
+    return preferences.map((preference) => {
+      const status = statuses.get(preference.provider);
+      return {
+        ...preference,
+        detected: status?.detected ?? false,
+        sessionRoots: status?.sessionRoots ?? [],
+        sessionCount: counts[preference.provider] ?? 0,
+      };
+    });
+  };
+
+  app.get("/api/settings/providers", async (context) =>
+    context.json({ settings: await listProviderSourceSettings() }),
+  );
+
+  app.patch("/api/settings/providers/:provider", async (context) => {
+    const provider = providerValue(context.req.param("provider"));
+    const parsed = providerSourceSchema.safeParse(await context.req.json());
+    if (provider === undefined || !parsed.success) {
+      return context.json({ error: "Invalid provider source setting" }, 400);
+    }
+    if (parsed.data.home !== null && !isAbsolute(parsed.data.home)) {
+      return context.json({ error: "Provider home must be an absolute path" }, 400);
+    }
+    try {
+      database.updateProviderSourceSetting(provider, parsed.data);
+      const preferences = database.getProviderSourceSettings(config.providerHomes, config.providers);
+      const homes = Object.fromEntries(
+        preferences.map((preference) => [preference.provider, preference.home]),
+      ) as AppConfig["providerHomes"];
+      const enabled = new Set(
+        preferences.filter((preference) => preference.enabled).map((preference) => preference.provider),
+      );
+      for (const preference of preferences) {
+        if (!preference.enabled) database.removeMissingFiles(preference.provider, new Set());
+      }
+      await indexer.reconfigure(createEnabledProviders(enabled, homes), config.watch);
+      return context.json({ settings: await listProviderSourceSettings() });
+    } catch (error) {
+      return context.json({ error: String(error) }, 400);
+    }
+  });
 
   app.get("/api/status", async (context) =>
     context.json({

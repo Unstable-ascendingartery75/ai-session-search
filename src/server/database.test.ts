@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, test } from "vitest";
-import type { ParsedSession } from "../shared/types.ts";
+import { PROVIDER_IDS, type ParsedSession, type ProviderId } from "../shared/types.ts";
 import { SearchDatabase } from "./database.ts";
 
 const cleanup: Array<() => Promise<void>> = [];
@@ -251,6 +251,43 @@ describe("SearchDatabase", () => {
       terminal: "powershell",
       customPath: null,
       shellPath: "pwsh.exe",
+    });
+  });
+
+  test("persists provider source paths and enabled states without changing defaults", async () => {
+    const database = await createDatabase();
+    const defaultHomes = Object.fromEntries(
+      PROVIDER_IDS.map((provider) => [provider, `/defaults/${provider}`]),
+    ) as Record<ProviderId, string>;
+    const defaultProviders = new Set<ProviderId>(PROVIDER_IDS);
+
+    expect(database.getProviderSourceSettings(defaultHomes, defaultProviders)).toContainEqual({
+      provider: "codex",
+      enabled: true,
+      home: "/defaults/codex",
+      defaultHome: "/defaults/codex",
+      customized: false,
+    });
+
+    database.updateProviderSourceSetting("codex", {
+      enabled: false,
+      home: "/archives/codex",
+    });
+    expect(database.getProviderSourceSettings(defaultHomes, defaultProviders)).toContainEqual({
+      provider: "codex",
+      enabled: false,
+      home: "/archives/codex",
+      defaultHome: "/defaults/codex",
+      customized: true,
+    });
+
+    database.updateProviderSourceSetting("codex", { enabled: true, home: null });
+    expect(database.getProviderSourceSettings(defaultHomes, defaultProviders)).toContainEqual({
+      provider: "codex",
+      enabled: true,
+      home: "/defaults/codex",
+      defaultHome: "/defaults/codex",
+      customized: false,
     });
   });
 

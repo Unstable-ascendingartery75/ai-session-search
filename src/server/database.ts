@@ -5,6 +5,7 @@ import type {
   NormalizedMessage,
   ParsedSession,
   ProviderId,
+  ProviderSourceSetting,
   ResumeCommandTemplates,
   SearchResult,
   SessionSummary,
@@ -617,6 +618,57 @@ export class SearchDatabase {
       const result = this.#db.prepare("DELETE FROM collections WHERE id = ?").run(id);
       this.#db.exec("COMMIT");
       return result.changes > 0;
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  getProviderSourceSettings(
+    defaultHomes: Record<ProviderId, string>,
+    defaultProviders: ReadonlySet<ProviderId>,
+  ): Array<Pick<ProviderSourceSetting, "provider" | "enabled" | "home" | "defaultHome" | "customized">> {
+    const rows = this.#db
+      .prepare("SELECT key, value FROM app_settings WHERE key LIKE 'provider_source.%'")
+      .all() as SqlRow[];
+    const values = new Map(rows.map((row) => [stringColumn(row, "key"), stringColumn(row, "value")]));
+    return PROVIDER_IDS.map((provider) => {
+      const defaultHome = defaultHomes[provider];
+      const storedHome = values.get(`provider_source.${provider}.home`)?.trim();
+      const customized = storedHome !== undefined && isAbsolute(storedHome);
+      const storedEnabled = values.get(`provider_source.${provider}.enabled`);
+      return {
+        provider,
+        enabled: storedEnabled === undefined ? defaultProviders.has(provider) : storedEnabled === "1",
+        home: customized ? storedHome : defaultHome,
+        defaultHome,
+        customized,
+      };
+    });
+  }
+
+  updateProviderSourceSetting(
+    provider: ProviderId,
+    setting: { enabled: boolean; home: string | null },
+  ): void {
+    const home = setting.home?.trim() || null;
+    if (home !== null && (!isAbsolute(home) || home.length > 2000)) {
+      throw new Error("Provider home must be an absolute path no longer than 2000 characters");
+    }
+    const update = this.#db.prepare(`
+      INSERT INTO app_settings(key, value, updated_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
+    `);
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      update.run(`provider_source.${provider}.enabled`, setting.enabled ? "1" : "0", Date.now());
+      if (home === null) {
+        this.#db.prepare("DELETE FROM app_settings WHERE key = ?").run(`provider_source.${provider}.home`);
+      } else {
+        update.run(`provider_source.${provider}.home`, home, Date.now());
+      }
+      this.#db.exec("COMMIT");
     } catch (error) {
       this.#db.exec("ROLLBACK");
       throw error;
