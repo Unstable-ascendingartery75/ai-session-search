@@ -9,7 +9,7 @@ export type CliOptions = {
   codexDir?: string;
   dataDir?: string;
   providers?: string;
-  noWatch?: boolean;
+  watch?: boolean;
 };
 
 export type AppConfig = {
@@ -69,5 +69,5 @@ export const resolveConfig = (options: CliOptions): AppConfig => ({
     options.codexDir ?? env("AI_SESSION_CODEX_HOME") ?? env("CODEX_HOME") ?? join(homedir(), ".codex"),
   ),
   providers: parseProviders(options.providers ?? env("AI_SESSION_PROVIDERS")),
-  watch: options.noWatch !== true,
+  watch: options.watch !== false,
 });
