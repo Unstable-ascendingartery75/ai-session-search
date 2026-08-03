@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -70,6 +70,107 @@ describe("conversation providers", () => {
     expect(parsed?.messages.map((message) => message.content)).toEqual([
       "查找订单问题",
       "定位到 OrderService",
+    ]);
+  });
+
+  test("Claude provider excludes sidechains even when their filenames do not start with agent-", async () => {
+    const home = await makeTempDirectory();
+    const project = join(home, "projects", "-workspace-demo");
+    const mainPath = join(project, "main-session.jsonl");
+    const sidechainPath = join(project, "main-session", "subagents", "worker.jsonl");
+    await mkdir(join(sidechainPath, ".."), { recursive: true });
+    await writeFile(mainPath, [
+      {
+        type: "user",
+        sessionId: "main-session",
+        isSidechain: false,
+        timestamp: "2026-01-01T00:00:00.000Z",
+        message: { role: "user", content: "Claude main question" },
+      },
+      {
+        type: "assistant",
+        sessionId: "main-session",
+        isSidechain: false,
+        timestamp: "2026-01-01T00:00:01.000Z",
+        message: { role: "assistant", content: [{ type: "text", text: "Claude main answer" }] },
+      },
+    ].map((record) => JSON.stringify(record)).join("\n"));
+    await writeFile(sidechainPath, [
+      {
+        type: "user",
+        sessionId: "main-session",
+        agentId: "worker",
+        isSidechain: true,
+        timestamp: "2026-01-01T00:00:00.500Z",
+        message: { role: "user", content: "Claude child task" },
+      },
+      {
+        type: "assistant",
+        sessionId: "main-session",
+        agentId: "worker",
+        isSidechain: true,
+        timestamp: "2026-01-01T00:00:00.750Z",
+        message: { role: "assistant", content: [{ type: "text", text: "Claude child detail" }] },
+      },
+    ].map((record) => JSON.stringify(record)).join("\n"));
+
+    const provider = createClaudeProvider(home);
+    const files = await provider.discover();
+    expect(files.map((file) => file.path)).toEqual([mainPath]);
+    const sidechainStat = await stat(sidechainPath);
+    await expect(provider.parse({
+      provider: "claude",
+      path: sidechainPath,
+      mtimeMs: sidechainStat.mtimeMs,
+      size: sidechainStat.size,
+    })).resolves.toBeNull();
+  });
+
+  test("Cursor provider excludes nested subagent transcripts that would reuse the parent id", async () => {
+    const home = await makeTempDirectory();
+    const transcriptRoot = join(home, "projects", "work", "agent-transcripts", "parent-1");
+    const mainPath = join(transcriptRoot, "parent-1.jsonl");
+    const childPath = join(transcriptRoot, "subagents", "child-1.jsonl");
+    await mkdir(join(childPath, ".."), { recursive: true });
+    await writeFile(mainPath, [
+      { role: "user", message: { content: "Cursor main question" } },
+      { role: "assistant", message: { content: "Cursor main answer" } },
+    ].map((record) => JSON.stringify(record)).join("\n"));
+    await writeFile(childPath, [
+      { role: "user", message: { content: "Cursor child task" } },
+      { role: "assistant", message: { content: "Cursor child detail" } },
+    ].map((record) => JSON.stringify(record)).join("\n"));
+
+    const provider = createCursorProvider(home);
+    const files = await provider.discover();
+    expect(files.map((file) => file.path)).toEqual([mainPath]);
+    expect((await provider.parse(files[0]!))?.sessionKey).toBe("cursor:parent-1");
+    const childStat = await stat(childPath);
+    await expect(provider.parse({
+      provider: "cursor",
+      path: childPath,
+      mtimeMs: childStat.mtimeMs,
+      size: childStat.size,
+    })).resolves.toBeNull();
+  });
+
+  test("Copilot provider keeps root messages and excludes subagent event envelopes", async () => {
+    const home = await makeTempDirectory();
+    const path = join(home, "session-state", "copilot-1", "events.jsonl");
+    await mkdir(join(path, ".."), { recursive: true });
+    await writeFile(path, [
+      { type: "session.start", data: { sessionId: "copilot-1" } },
+      { type: "user.message", data: { content: "Copilot main question" } },
+      { type: "assistant.message", agentId: "researcher", data: { content: "Copilot child detail one" } },
+      { type: "assistant.message", data: { agentId: "reviewer", content: "Copilot child detail two" } },
+      { type: "assistant.message", data: { content: "Copilot main answer" } },
+    ].map((record) => JSON.stringify(record)).join("\n"));
+
+    const provider = createCopilotProvider(home);
+    const parsed = await provider.parse((await provider.discover())[0]!);
+    expect(parsed?.messages.map((message) => message.content)).toEqual([
+      "Copilot main question",
+      "Copilot main answer",
     ]);
   });
 
@@ -180,15 +281,18 @@ describe("conversation providers", () => {
     const path = join(home, "opencode.db");
     const source = new DatabaseSync(path);
     source.exec(`
-      CREATE TABLE session (id TEXT PRIMARY KEY, title TEXT, directory TEXT, time_created INTEGER, time_updated INTEGER, time_archived INTEGER);
+      CREATE TABLE session (id TEXT PRIMARY KEY, parent_id TEXT, title TEXT, directory TEXT, agent TEXT, time_created INTEGER, time_updated INTEGER, time_archived INTEGER);
       CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, data TEXT);
       CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, time_created INTEGER, data TEXT);
     `);
-    source.prepare("INSERT INTO session VALUES (?, ?, ?, ?, ?, NULL)").run("oc-1", "OpenCode 测试", "/work/opencode", 1_800_000_000_000, 1_800_000_001_000);
+    source.prepare("INSERT INTO session VALUES (?, NULL, ?, ?, ?, ?, ?, NULL)").run("oc-1", "OpenCode 测试", "/work/opencode", "build", 1_800_000_000_000, 1_800_000_001_000);
+    source.prepare("INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?, NULL)").run("oc-child", "oc-1", "检查实现 (@review subagent)", "/work/opencode", "review", 1_800_000_000_100, 1_800_000_000_900);
     source.prepare("INSERT INTO message VALUES (?, ?, ?, ?)").run("m1", "oc-1", 1_800_000_000_000, JSON.stringify({ role: "user" }));
     source.prepare("INSERT INTO part VALUES (?, ?, ?, ?)").run("p1", "m1", 1, JSON.stringify({ type: "text", text: "OpenCode 用户问题" }));
     source.prepare("INSERT INTO message VALUES (?, ?, ?, ?)").run("m2", "oc-1", 1_800_000_001_000, JSON.stringify({ role: "assistant" }));
     source.prepare("INSERT INTO part VALUES (?, ?, ?, ?)").run("p2", "m2", 2, JSON.stringify({ type: "text", text: "OpenCode 回答" }));
+    source.prepare("INSERT INTO message VALUES (?, ?, ?, ?)").run("m3", "oc-child", 1_800_000_000_100, JSON.stringify({ role: "assistant" }));
+    source.prepare("INSERT INTO part VALUES (?, ?, ?, ?)").run("p3", "m3", 3, JSON.stringify({ type: "text", text: "OpenCode child detail" }));
     source.close();
 
     const provider = createOpenCodeProvider(home);
@@ -197,6 +301,58 @@ describe("conversation providers", () => {
     const parsed = await provider.parse(files[0]!);
     expect(parsed?.originalTitle).toBe("OpenCode 测试");
     expect(parsed?.messages.map((message) => message.content)).toEqual(["OpenCode 用户问题", "OpenCode 回答"]);
+  });
+
+  test("OpenClaw provider excludes transcripts marked as spawned sessions", async () => {
+    const home = await makeTempDirectory();
+    const sessions = join(home, "agents", "main", "sessions");
+    const mainPath = join(sessions, "main-id.jsonl");
+    const childPath = join(sessions, "child-id.jsonl");
+    const orphanChildPath = join(sessions, "orphan-child-id.jsonl");
+    await mkdir(sessions, { recursive: true });
+    await mkdir(join(home, "subagents"), { recursive: true });
+    await writeFile(join(sessions, "sessions.json"), JSON.stringify({
+      "agent:main:main": { sessionId: "main-id", updatedAt: 1 },
+      "agent:main:subagent:child": {
+        sessionId: "child-id",
+        updatedAt: 2,
+        spawnedBy: "agent:main:main",
+        spawnDepth: 1,
+      },
+    }));
+    await writeFile(join(home, "subagents", "runs.json"), JSON.stringify({
+      runs: {
+        "run-1": {
+          childSessionKey: "agent:main:subagent:orphan-child-id",
+          requesterSessionKey: "agent:main:main",
+        },
+      },
+    }));
+    await writeFile(mainPath, [
+      { type: "session", id: "main-id", cwd: "/work/openclaw" },
+      { type: "message", message: { role: "user", content: "OpenClaw main question" } },
+      { type: "message", message: { role: "assistant", content: "OpenClaw main answer" } },
+    ].map((record) => JSON.stringify(record)).join("\n"));
+    await writeFile(childPath, [
+      { type: "session", id: "child-id", cwd: "/work/openclaw" },
+      { type: "message", message: { role: "user", content: "OpenClaw child task" } },
+      { type: "message", message: { role: "assistant", content: "OpenClaw child detail" } },
+    ].map((record) => JSON.stringify(record)).join("\n"));
+    await writeFile(orphanChildPath, [
+      { type: "session", id: "orphan-child-id", cwd: "/work/openclaw" },
+      { type: "message", message: { role: "assistant", content: "OpenClaw orphan child detail" } },
+    ].map((record) => JSON.stringify(record)).join("\n"));
+
+    const provider = createOpenClawProvider(home);
+    const files = await provider.discover();
+    expect(files.map((file) => file.path)).toEqual([mainPath]);
+    const childStat = await stat(childPath);
+    await expect(provider.parse({
+      provider: "openclaw",
+      path: childPath,
+      mtimeMs: childStat.mtimeMs,
+      size: childStat.size,
+    })).resolves.toBeNull();
   });
 
   test("Codex provider reads active and archived sessions without duplicate event records", async () => {
@@ -263,5 +419,132 @@ describe("conversation providers", () => {
       "排查支付异常",
       "问题位于支付回调",
     ]);
+  });
+
+  test("Codex provider excludes subagents without hiding user forks", async () => {
+    const home = await makeTempDirectory();
+    const sessions = join(home, "sessions", "2026", "01", "01");
+    await mkdir(sessions, { recursive: true });
+    const mainId = "01900000-0000-7000-8000-000000000010";
+    const subagentId = "01900000-0000-7000-8000-000000000011";
+    const userForkId = "01900000-0000-7000-8000-000000000012";
+    const mainPath = join(sessions, `rollout-2026-01-01T00-00-00-${mainId}.jsonl`);
+    const subagentPath = join(sessions, `rollout-2026-01-01T00-01-00-${subagentId}.jsonl`);
+    const userForkPath = join(sessions, `rollout-2026-01-01T00-02-00-${userForkId}.jsonl`);
+
+    await writeFile(mainPath, [
+      {
+        type: "session_meta",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        payload: {
+          id: mainId,
+          session_id: mainId,
+          cwd: "/workspace/main",
+          thread_source: "user",
+          source: "cli",
+        },
+      },
+      {
+        type: "event_msg",
+        timestamp: "2026-01-01T00:00:01.000Z",
+        payload: { type: "user_message", message: "让 subagent 开发并审查代码" },
+      },
+      {
+        type: "response_item",
+        timestamp: "2026-01-01T00:03:00.000Z",
+        payload: {
+          type: "message",
+          role: "assistant",
+          phase: "final_answer",
+          content: [{ type: "output_text", text: "主会话在 subagent 完成后的最终汇总" }],
+        },
+      },
+    ].map((record) => JSON.stringify(record)).join("\n"));
+
+    await writeFile(subagentPath, [
+      {
+        type: "session_meta",
+        timestamp: "2026-01-01T00:01:00.000Z",
+        payload: {
+          id: subagentId,
+          session_id: mainId,
+          forked_from_id: mainId,
+          parent_thread_id: mainId,
+          cwd: "/workspace/main",
+          thread_source: "subagent",
+          source: {
+            subagent: {
+              thread_spawn: { parent_thread_id: mainId, depth: 1, agent_path: "/root/repro" },
+            },
+          },
+        },
+      },
+      {
+        type: "session_meta",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        payload: {
+          id: mainId,
+          session_id: mainId,
+          cwd: "/workspace/main",
+          thread_source: "user",
+          source: "cli",
+        },
+      },
+      {
+        type: "response_item",
+        timestamp: "2026-01-01T00:01:01.000Z",
+        payload: {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "subagent 独有的内部开发细节" }],
+        },
+      },
+    ].map((record) => JSON.stringify(record)).join("\n"));
+
+    await writeFile(userForkPath, [
+      {
+        type: "session_meta",
+        timestamp: "2026-01-01T00:02:00.000Z",
+        payload: {
+          id: userForkId,
+          session_id: mainId,
+          forked_from_id: mainId,
+          cwd: "/workspace/fork",
+          thread_source: "user",
+          source: "cli",
+        },
+      },
+      {
+        type: "session_meta",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        payload: { id: mainId, session_id: mainId, cwd: "/workspace/main" },
+      },
+      {
+        type: "event_msg",
+        timestamp: "2026-01-01T00:02:01.000Z",
+        payload: { type: "user_message", message: "保留用户主动创建的 fork" },
+      },
+    ].map((record) => JSON.stringify(record)).join("\n"));
+
+    const provider = createCodexProvider(home);
+    const files = await provider.discover();
+    expect(files.map((file) => file.path).sort()).toEqual([mainPath, userForkPath].sort());
+
+    const parsedMain = await provider.parse(files.find((file) => file.path === mainPath)!);
+    expect(parsedMain?.sourceSessionId).toBe(mainId);
+    expect(parsedMain?.messages.at(-1)?.content).toBe("主会话在 subagent 完成后的最终汇总");
+
+    const parsedFork = await provider.parse(files.find((file) => file.path === userForkPath)!);
+    expect(parsedFork?.sourceSessionId).toBe(userForkId);
+    expect(parsedFork?.projectPath).toBe("/workspace/fork");
+
+    const subagentStat = await stat(subagentPath);
+    const parsedSubagent = await provider.parse({
+      provider: "codex",
+      path: subagentPath,
+      mtimeMs: subagentStat.mtimeMs,
+      size: subagentStat.size,
+    });
+    expect(parsedSubagent).toBeNull();
   });
 });

@@ -4,6 +4,7 @@ import {
   compactTitle,
   discoverJsonlFiles,
   isRecord,
+  readFirstJsonlRecord,
   readJsonl,
   stringValue,
 } from "./files.ts";
@@ -26,6 +27,9 @@ const extractTextItems = (content: unknown, expectedType?: string): string => {
 
 const sourceIdFromPath = (filePath: string): string => basename(filePath, ".jsonl");
 
+const isClaudeSidechainRecord = (record: unknown): boolean =>
+  isRecord(record) && record.isSidechain === true;
+
 const parseClaudeSession = async (home: string, file: SessionFile): Promise<ParsedSession | null> => {
   const messages: NormalizedMessage[] = [];
   let cwd: string | null = null;
@@ -33,9 +37,11 @@ const parseClaudeSession = async (home: string, file: SessionFile): Promise<Pars
   let aiTitle: string | null = null;
   let firstTimestamp = "";
   let lastTimestamp = "";
+  let isSidechain = false;
 
   await readJsonl(file.path, (record) => {
     if (!isRecord(record)) return;
+    if (record.isSidechain === true) isSidechain = true;
     const type = stringValue(record.type);
     const timestamp = stringValue(record.timestamp) ?? "";
     if (timestamp !== "") {
@@ -70,7 +76,7 @@ const parseClaudeSession = async (home: string, file: SessionFile): Promise<Pars
     });
   });
 
-  if (messages.length === 0) return null;
+  if (isSidechain || messages.length === 0) return null;
   const sourceSessionId = sourceIdFromPath(file.path);
   const relativePath = relative(join(home, "projects"), file.path);
   const projectDirectory = relativePath.split(/[\\/]/)[0] ?? basename(dirname(file.path));
@@ -97,11 +103,13 @@ export const createClaudeProvider = (home: string): ConversationProvider => {
     home,
     sessionRoots,
     discover: async () => {
-      const files = await discoverJsonlFiles(
-        sessionRoots,
-        (path) => !basename(path).startsWith("agent-"),
-      );
-      return files.map((file) => ({ ...file, provider: "claude" }));
+      const files = await discoverJsonlFiles(sessionRoots);
+      const visibleFiles = await Promise.all(files.map(async (file) => {
+        if (basename(file.path).startsWith("agent-")) return null;
+        if (isClaudeSidechainRecord(await readFirstJsonlRecord(file.path))) return null;
+        return { ...file, provider: "claude" as const };
+      }));
+      return visibleFiles.filter((file) => file !== null);
     },
     parse: (file) => parseClaudeSession(home, file),
   };

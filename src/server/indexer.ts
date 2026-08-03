@@ -119,29 +119,50 @@ export class SessionIndexer {
     }
 
     const files = await provider.discover();
+    const parserVersion = provider.parserVersion ?? 1;
     onProgress?.(0, files.length);
     const visibleFiles = new Set(files.map((file) => file.path));
     let indexed = 0;
     let unchanged = 0;
     let errors = 0;
+    const claimedSessionKeys = new Map<string, { path: string; result: "indexed" | "unchanged" }>();
+    const conflictedSessionKeys = new Set<string>();
 
     let processed = 0;
     for (const file of files) {
       if (this.#closed) break;
       try {
         const existing = this.#database.getIndexedFile(file.path);
-        if (
+        const isUnchanged =
           existing !== null &&
           Math.trunc(existing.mtimeMs) === Math.trunc(file.mtimeMs) &&
-          existing.size === file.size
-        ) {
+          existing.size === file.size &&
+          existing.parserVersion === parserVersion;
+        const session = isUnchanged ? null : await provider.parse(file);
+        const sessionKey = isUnchanged ? existing.sessionKey : session?.sessionKey;
+        if (sessionKey === undefined || conflictedSessionKeys.has(sessionKey)) continue;
+
+        const claimed = claimedSessionKeys.get(sessionKey);
+        if (claimed !== undefined && claimed.path !== file.path) {
+          this.#database.removeSessionIndex(sessionKey);
+          claimedSessionKeys.delete(sessionKey);
+          conflictedSessionKeys.add(sessionKey);
+          if (claimed.result === "indexed") indexed -= 1;
+          else unchanged -= 1;
+          errors += 1;
+          process.stderr.write(
+            `[${provider.id}] Duplicate session key ${sessionKey} from ${claimed.path} and ${file.path}; removed the ambiguous index\n`,
+          );
+          continue;
+        }
+
+        if (isUnchanged) {
           unchanged += 1;
-        } else {
-          const session = await provider.parse(file);
-          if (session !== null) {
-            this.#database.upsertSession(session, file);
-            indexed += 1;
-          }
+          claimedSessionKeys.set(sessionKey, { path: file.path, result: "unchanged" });
+        } else if (session !== null) {
+          this.#database.upsertSession(session, file, parserVersion);
+          indexed += 1;
+          claimedSessionKeys.set(sessionKey, { path: file.path, result: "indexed" });
         }
       } catch (error) {
         errors += 1;

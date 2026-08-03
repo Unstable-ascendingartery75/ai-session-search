@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { readFile, stat } from "node:fs/promises";
-import { basename, dirname, join, relative, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { NormalizedMessage, ParsedSession, ProviderId } from "../../shared/types.ts";
 import { compactTitle, discoverFiles, discoverJsonlFiles, isRecord, readJsonl, stringValue } from "./files.ts";
 import type { ConversationProvider, SessionFile } from "./types.ts";
@@ -139,12 +139,13 @@ export const createPiProvider = (home: string): ConversationProvider =>
     },
   });
 
-export const createCursorProvider = (home: string): ConversationProvider =>
-  jsonlProvider({
+export const createCursorProvider = (home: string): ConversationProvider => {
+  const isSubagentPath = (path: string): boolean => path.split(sep).includes("subagents");
+  const provider = jsonlProvider({
     id: "cursor",
     home,
     roots: [join(home, "projects")],
-    include: (path) => path.includes(`${sep}agent-transcripts${sep}`),
+    include: (path) => path.includes(`${sep}agent-transcripts${sep}`) && !isSubagentPath(path),
     parseRecord: (record, session, file) => {
       parseNestedMessage(record, session);
       const parts = file.path.split(sep);
@@ -153,6 +154,11 @@ export const createCursorProvider = (home: string): ConversationProvider =>
       if (transcriptIndex >= 0 && parts[transcriptIndex + 1]) session.id = parts[transcriptIndex + 1] as string;
     },
   });
+  return {
+    ...provider,
+    parse: (file) => isSubagentPath(file.path) ? Promise.resolve(null) : provider.parse(file),
+  };
+};
 
 export const createCopilotProvider = (home: string): ConversationProvider =>
   jsonlProvider({
@@ -162,6 +168,7 @@ export const createCopilotProvider = (home: string): ConversationProvider =>
     include: (path) => basename(path) === "events.jsonl" || dirname(path).endsWith("session-state"),
     parseRecord: (record, session, file) => {
       const data = isRecord(record.data) ? record.data : record;
+      if (stringValue(record.agentId) !== null || stringValue(data.agentId) !== null) return;
       const type = stringValue(record.type) ?? stringValue(data.type) ?? "";
       session.id = stringValue(data.sessionId) ?? (basename(file.path) === "events.jsonl" ? basename(dirname(file.path)) : session.id);
       if (type === "session.info") session.cwd = stringValue(data.cwd) ?? stringValue(data.path) ?? session.cwd;
@@ -189,14 +196,73 @@ export const createDroidProvider = (home: string): ConversationProvider =>
     },
   });
 
-export const createOpenClawProvider = (home: string): ConversationProvider =>
-  jsonlProvider({
+const openClawSubagentTranscripts = async (
+  home: string,
+  roots: string[],
+): Promise<{ paths: Set<string>; sessionIds: Set<string> }> => {
+  const paths = new Set<string>();
+  const sessionIds = new Set<string>();
+  const stores = await discoverFiles(roots, (path) => basename(path) === "sessions.json");
+  for (const store of stores) {
+    let value: unknown;
+    try { value = JSON.parse(await readFile(store.path, "utf8")); } catch { continue; }
+    const visit = (candidate: unknown, keyHint = ""): void => {
+      if (Array.isArray(candidate)) {
+        for (const item of candidate) visit(item, keyHint);
+        return;
+      }
+      if (!isRecord(candidate)) return;
+      const spawnDepth = typeof candidate.spawnDepth === "number" ? candidate.spawnDepth : 0;
+      const isSubagent =
+        keyHint.includes(":subagent:") ||
+        stringValue(candidate.spawnedBy) !== null ||
+        spawnDepth > 0;
+      if (isSubagent) {
+        const sessionId = stringValue(candidate.sessionId);
+        if (sessionId !== null) {
+          sessionIds.add(sessionId);
+          paths.add(join(dirname(store.path), `${sessionId}.jsonl`));
+        }
+        const sessionFile = stringValue(candidate.sessionFile);
+        if (sessionFile !== null) {
+          paths.add(isAbsolute(sessionFile) ? sessionFile : resolve(dirname(store.path), sessionFile));
+        }
+      }
+      for (const [key, child] of Object.entries(candidate)) visit(child, key);
+    };
+    visit(value);
+  }
+  try {
+    const runs: unknown = JSON.parse(await readFile(join(home, "subagents", "runs.json"), "utf8"));
+    const visitRuns = (candidate: unknown): void => {
+      if (Array.isArray(candidate)) {
+        for (const item of candidate) visitRuns(item);
+        return;
+      }
+      if (!isRecord(candidate)) return;
+      const childSessionId = stringValue(candidate.childSessionId);
+      if (childSessionId !== null) sessionIds.add(childSessionId);
+      const childSessionKey = stringValue(candidate.childSessionKey);
+      if (childSessionKey !== null && childSessionKey.includes(":subagent:")) {
+        const suffix = childSessionKey.slice(childSessionKey.lastIndexOf(":subagent:") + ":subagent:".length);
+        if (suffix !== "") sessionIds.add(suffix);
+      }
+      for (const child of Object.values(candidate)) visitRuns(child);
+    };
+    visitRuns(runs);
+  } catch { /* The run registry is optional and may be updated concurrently. */ }
+  return { paths, sessionIds };
+};
+
+export const createOpenClawProvider = (home: string): ConversationProvider => {
+  const roots = [
+    join(home, "agents"),
+    ...(basename(home) === ".openclaw" ? [join(dirname(home), ".clawdbot", "agents")] : []),
+  ];
+  const provider = jsonlProvider({
     id: "openclaw",
     home,
-    roots: [
-      join(home, "agents"),
-      ...(basename(home) === ".openclaw" ? [join(dirname(home), ".clawdbot", "agents")] : []),
-    ],
+    roots,
     include: (path) => !path.endsWith(".trajectory.jsonl") && !path.endsWith(".jsonl.lock"),
     parseRecord: (record, session) => {
       if (record.type === "session") {
@@ -205,6 +271,21 @@ export const createOpenClawProvider = (home: string): ConversationProvider =>
       } else if (record.type === "message") parseNestedMessage(record, session);
     },
   });
+  let subagentPaths = new Set<string>();
+  let subagentSessionIds = new Set<string>();
+  const isSubagentFile = (file: SessionFile): boolean =>
+    subagentPaths.has(file.path) || subagentSessionIds.has(basename(file.path, ".jsonl"));
+  return {
+    ...provider,
+    discover: async () => {
+      const subagents = await openClawSubagentTranscripts(home, roots);
+      subagentPaths = subagents.paths;
+      subagentSessionIds = subagents.sessionIds;
+      return (await provider.discover()).filter((file) => !isSubagentFile(file));
+    },
+    parse: (file) => isSubagentFile(file) ? Promise.resolve(null) : provider.parse(file),
+  };
+};
 
 const stripUserRequest = (value: string): string => {
   const match = value.match(/<USER_REQUEST>\s*([\s\S]*?)\s*<\/USER_REQUEST>/i);
@@ -308,6 +389,10 @@ const openReadOnly = (path: string): DatabaseSync | null => {
   }
 };
 
+const tableHasColumn = (db: DatabaseSync, table: string, column: string): boolean =>
+  (db.prepare(`PRAGMA table_info(${table})`).all() as Array<Record<string, unknown>>)
+    .some((row) => row.name === column);
+
 const decodeVirtualId = (path: string): { dbPath: string; id: string } | null => {
   const marker = path.lastIndexOf("#");
   if (marker < 0) return null;
@@ -326,7 +411,10 @@ export const createOpenCodeProvider = (home: string): ConversationProvider => {
       const db = openReadOnly(dbPath);
       if (db !== null) {
         try {
-          const rows = db.prepare("SELECT id FROM session WHERE time_archived IS NULL").all() as Array<{ id: string }>;
+          const hasParentId = tableHasColumn(db, "session", "parent_id");
+          const rows = db.prepare(
+            `SELECT id FROM session WHERE time_archived IS NULL${hasParentId ? " AND parent_id IS NULL" : ""}`,
+          ).all() as Array<{ id: string }>;
           return await Promise.all(rows.map((row) => virtualFile("opencode", dbPath, row.id)));
         } catch {
           // A legacy installation may have an unrelated or incomplete database.
@@ -343,6 +431,7 @@ export const createOpenCodeProvider = (home: string): ConversationProvider => {
         let value: unknown;
         try { value = JSON.parse(await readFile(file.path, "utf8")); } catch { return null; }
         if (!isRecord(value)) return null;
+        if (stringValue(value.parent_id) !== null || stringValue(value.parentID) !== null) return null;
         const session = createMutable(file);
         session.id = stringValue(value.id) ?? session.id;
         session.title = stringValue(value.title);
@@ -381,8 +470,12 @@ export const createOpenCodeProvider = (home: string): ConversationProvider => {
       const db = openReadOnly(virtual.dbPath);
       if (db === null) return null;
       try {
-        const row = db.prepare("SELECT id, title, directory, time_created, time_updated FROM session WHERE id = ?").get(virtual.id) as Record<string, unknown> | undefined;
+        const hasParentId = tableHasColumn(db, "session", "parent_id");
+        const row = db.prepare(
+          `SELECT id, title, directory, time_created, time_updated${hasParentId ? ", parent_id" : ""} FROM session WHERE id = ?`,
+        ).get(virtual.id) as Record<string, unknown> | undefined;
         if (row === undefined) return null;
+        if (typeof row.parent_id === "string") return null;
         const session = createMutable(file);
         session.id = String(row.id);
         session.title = typeof row.title === "string" ? row.title : null;

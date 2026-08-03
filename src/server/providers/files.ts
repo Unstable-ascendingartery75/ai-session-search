@@ -92,6 +92,27 @@ export const readJsonl = async (
   }
 };
 
+export const readFirstJsonlRecord = async (path: string): Promise<unknown | null> => {
+  const input = createReadStream(path, { encoding: "utf8" });
+  const lines = createInterface({ input, crlfDelay: Number.POSITIVE_INFINITY });
+  try {
+    for await (const line of lines) {
+      if (line.trim() === "") continue;
+      try {
+        return JSON.parse(line) as unknown;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  } finally {
+    lines.close();
+    input.destroy();
+  }
+};
+
 export const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 

@@ -105,6 +105,7 @@ export class SearchDatabase {
         message_count INTEGER NOT NULL,
         file_mtime_ms INTEGER NOT NULL,
         file_size INTEGER NOT NULL,
+        parser_version INTEGER NOT NULL DEFAULT 0,
         indexed_at INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_sessions_provider ON sessions(provider);
@@ -129,6 +130,10 @@ export class SearchDatabase {
       );
     `);
     this.#migrateProviderConstraint();
+    const sessionColumns = this.#db.prepare("PRAGMA table_info(sessions)").all() as SqlRow[];
+    if (!sessionColumns.some((row) => stringColumn(row, "name") === "parser_version")) {
+      this.#db.exec("ALTER TABLE sessions ADD COLUMN parser_version INTEGER NOT NULL DEFAULT 0");
+    }
     const metadataColumns = this.#db.prepare("PRAGMA table_info(session_metadata)").all() as SqlRow[];
     if (!metadataColumns.some((row) => stringColumn(row, "name") === "collection_id")) {
       this.#db.exec("ALTER TABLE session_metadata ADD COLUMN collection_id INTEGER");
@@ -158,9 +163,18 @@ export class SearchDatabase {
         message_count INTEGER NOT NULL,
         file_mtime_ms INTEGER NOT NULL,
         file_size INTEGER NOT NULL,
+        parser_version INTEGER NOT NULL DEFAULT 0,
         indexed_at INTEGER NOT NULL
       );
-      INSERT INTO sessions SELECT * FROM sessions_provider_v1;
+      INSERT INTO sessions (
+        session_key, source_session_id, provider, file_path, project_path,
+        original_title, started_at, updated_at, message_count,
+        file_mtime_ms, file_size, parser_version, indexed_at
+      ) SELECT
+        session_key, source_session_id, provider, file_path, project_path,
+        original_title, started_at, updated_at, message_count,
+        file_mtime_ms, file_size, 0, indexed_at
+      FROM sessions_provider_v1;
       DROP TABLE sessions_provider_v1;
       CREATE INDEX IF NOT EXISTS idx_sessions_provider ON sessions(provider);
       CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON sessions(updated_at);
@@ -172,21 +186,45 @@ export class SearchDatabase {
     this.#db.close();
   }
 
-  getIndexedFile(path: string): { mtimeMs: number; size: number } | null {
+  getIndexedFile(path: string): {
+    sessionKey: string;
+    mtimeMs: number;
+    size: number;
+    parserVersion: number;
+  } | null {
     const row = this.#db
-      .prepare("SELECT file_mtime_ms, file_size FROM sessions WHERE file_path = ?")
+      .prepare(
+        "SELECT session_key, file_mtime_ms, file_size, parser_version FROM sessions WHERE file_path = ?",
+      )
       .get(path) as SqlRow | undefined;
     if (row === undefined) return null;
-    return { mtimeMs: numberColumn(row, "file_mtime_ms"), size: numberColumn(row, "file_size") };
+    return {
+      sessionKey: stringColumn(row, "session_key"),
+      mtimeMs: numberColumn(row, "file_mtime_ms"),
+      size: numberColumn(row, "file_size"),
+      parserVersion: numberColumn(row, "parser_version"),
+    };
   }
 
-  upsertSession(session: ParsedSession, file: SessionFile): void {
+  removeSessionIndex(sessionKey: string): void {
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      this.#db.prepare("DELETE FROM sessions WHERE session_key = ?").run(sessionKey);
+      this.#db.prepare("DELETE FROM messages_fts WHERE session_key = ?").run(sessionKey);
+      this.#db.exec("COMMIT");
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  upsertSession(session: ParsedSession, file: SessionFile, parserVersion = 1): void {
     const insertSession = this.#db.prepare(`
       INSERT INTO sessions (
         session_key, source_session_id, provider, file_path, project_path,
         original_title, started_at, updated_at, message_count,
-        file_mtime_ms, file_size, indexed_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        file_mtime_ms, file_size, parser_version, indexed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(session_key) DO UPDATE SET
         source_session_id=excluded.source_session_id,
         provider=excluded.provider,
@@ -198,6 +236,7 @@ export class SearchDatabase {
         message_count=excluded.message_count,
         file_mtime_ms=excluded.file_mtime_ms,
         file_size=excluded.file_size,
+        parser_version=excluded.parser_version,
         indexed_at=excluded.indexed_at
     `);
     const deleteFts = this.#db.prepare("DELETE FROM messages_fts WHERE session_key = ?");
@@ -221,6 +260,7 @@ export class SearchDatabase {
         session.messages.length,
         Math.trunc(file.mtimeMs),
         file.size,
+        parserVersion,
         Date.now(),
       );
       deleteFts.run(session.sessionKey);

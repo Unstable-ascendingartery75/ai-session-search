@@ -5,6 +5,7 @@ import {
   compactTitle,
   discoverJsonlFiles,
   isRecord,
+  readFirstJsonlRecord,
   readJsonl,
   stringValue,
 } from "./files.ts";
@@ -12,6 +13,17 @@ import type { ConversationProvider, SessionFile } from "./types.ts";
 
 const getPayload = (record: Record<string, unknown>): Record<string, unknown> | null =>
   isRecord(record.payload) ? record.payload : null;
+
+const isSubagentSessionMeta = (record: unknown): boolean => {
+  if (!isRecord(record) || record.type !== "session_meta") return false;
+  const payload = getPayload(record);
+  if (payload === null) return false;
+  const source = payload.source;
+  return (
+    stringValue(payload.thread_source) === "subagent" ||
+    (isRecord(source) && isRecord(source.subagent))
+  );
+};
 
 const extractContentText = (content: unknown, type: "input_text" | "output_text"): string => {
   if (!Array.isArray(content)) return "";
@@ -64,6 +76,8 @@ const parseCodexSession = async (
   let cwd: string | null = null;
   let firstTimestamp = "";
   let lastTimestamp = "";
+  let sessionMetaSeen = false;
+  let isSubagent = false;
 
   await readJsonl(file.path, (record) => {
     if (!isRecord(record)) return;
@@ -76,10 +90,15 @@ const parseCodexSession = async (
     if (payload === null) return;
 
     if (record.type === "session_meta") {
+      if (sessionMetaSeen) return;
+      sessionMetaSeen = true;
+      isSubagent = isSubagentSessionMeta(record);
       sourceSessionId = stringValue(payload.id) ?? stringValue(payload.session_id) ?? sourceSessionId;
       cwd = stringValue(payload.cwd) ?? cwd;
       return;
     }
+
+    if (isSubagent) return;
 
     if (record.type === "event_msg" && payload.type === "user_message") {
       const content = stringValue(payload.message);
@@ -118,7 +137,7 @@ const parseCodexSession = async (
     });
   }
 
-  if (messages.length === 0) return null;
+  if (isSubagent || messages.length === 0) return null;
   const fallbackTitle = messages.find((message) => message.role === "user")?.content ?? sourceSessionId;
 
   return {
@@ -149,7 +168,12 @@ export const createCodexProvider = (home: string): ConversationProvider => {
         const current = newestBySession.get(id);
         if (current === undefined || file.mtimeMs > current.mtimeMs) newestBySession.set(id, file);
       }
-      return [...newestBySession.values()].map((file) => ({ ...file, provider: "codex" }));
+      const visibleFiles = [];
+      for (const file of newestBySession.values()) {
+        if (isSubagentSessionMeta(await readFirstJsonlRecord(file.path))) continue;
+        visibleFiles.push({ ...file, provider: "codex" as const });
+      }
+      return visibleFiles;
     },
     parse: async (file) => parseCodexSession(file, await readSessionTitles(home)),
   };

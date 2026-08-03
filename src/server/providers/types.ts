@@ -11,6 +11,7 @@ export type ConversationProvider = {
   id: ProviderId;
   home: string;
   sessionRoots: string[];
+  parserVersion?: number;
   discover: () => Promise<SessionFile[]>;
   parse: (file: SessionFile) => Promise<ParsedSession | null>;
 };
