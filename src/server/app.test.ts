@@ -53,6 +53,7 @@ const createFixture = async (hostname = "127.0.0.1") => {
     indexer: {} as SessionIndexer,
     config,
     terminalLauncher,
+    runtimePlatform: "darwin",
   });
   return { app, database, terminalLauncher };
 };

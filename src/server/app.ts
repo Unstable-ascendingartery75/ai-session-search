@@ -73,8 +73,10 @@ export const createApp = (options: {
   config: AppConfig;
   terminalLauncher: Pick<TerminalLauncher, "launch">;
   clientDirectory?: string;
+  runtimePlatform?: NodeJS.Platform;
 }): Hono => {
   const { database, indexer, config, terminalLauncher } = options;
+  const runtimePlatform = options.runtimePlatform ?? process.platform;
   const app = new Hono();
 
   app.get("/api/providers", (context) => context.json({
@@ -87,7 +89,7 @@ export const createApp = (options: {
       counts: database.countSessions(),
       watch: config.watch,
       sync: indexer.syncProgress(),
-      runtimePlatform: normalizeRuntimePlatform(process.platform),
+      runtimePlatform: normalizeRuntimePlatform(runtimePlatform),
     }),
   );
 
@@ -119,13 +121,13 @@ export const createApp = (options: {
     if (template === undefined) {
       return context.json({ error: "Resume command is unavailable for this provider" }, 400);
     }
-    const terminalSettings = database.getTerminalSettings();
+    const terminalSettings = database.getTerminalSettings(runtimePlatform);
     const command = renderResumeCommand(template, {
       sessionId: result.session.sourceSessionId,
       cwd: result.session.projectPath,
     }, commandDialectForTerminal(
       terminalSettings.terminal,
-      normalizeRuntimePlatform(process.platform),
+      normalizeRuntimePlatform(runtimePlatform),
       terminalSettings.shellPath,
     ));
     try {
@@ -232,14 +234,16 @@ export const createApp = (options: {
   });
 
   app.get("/api/settings/terminal", (context) =>
-    context.json({ settings: database.getTerminalSettings() }),
+    context.json({ settings: database.getTerminalSettings(runtimePlatform) }),
   );
 
   app.patch("/api/settings/terminal", async (context) => {
     const parsed = terminalSettingsSchema.safeParse(await context.req.json());
     if (!parsed.success) return context.json({ error: parsed.error.issues }, 400);
     try {
-      return context.json({ settings: database.updateTerminalSettings(parsed.data) });
+      return context.json({
+        settings: database.updateTerminalSettings(parsed.data, runtimePlatform),
+      });
     } catch (error) {
       return context.json({ error: String(error) }, 400);
     }

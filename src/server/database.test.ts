@@ -207,23 +207,26 @@ describe("SearchDatabase", () => {
   test("provides and persists terminal launch settings", async () => {
     const database = await createDatabase();
 
-    expect(database.getTerminalSettings()).toMatchObject({
+    expect(database.getTerminalSettings("darwin")).toMatchObject({
       terminal: "terminal",
       customPath: null,
       shellPath: expect.stringMatching(/^\//),
     });
     expect(
-      database.updateTerminalSettings({
-        terminal: "custom",
-        customPath: "/Applications/Ghostty.app",
-        shellPath: "/bin/bash",
-      }),
+      database.updateTerminalSettings(
+        {
+          terminal: "custom",
+          customPath: "/Applications/Ghostty.app",
+          shellPath: "/bin/bash",
+        },
+        "darwin",
+      ),
     ).toEqual({
       terminal: "custom",
       customPath: "/Applications/Ghostty.app",
       shellPath: "/bin/bash",
     });
-    expect(database.getTerminalSettings()).toEqual({
+    expect(database.getTerminalSettings("darwin")).toEqual({
       terminal: "custom",
       customPath: "/Applications/Ghostty.app",
       shellPath: "/bin/bash",
