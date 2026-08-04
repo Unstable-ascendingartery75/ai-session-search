@@ -20,8 +20,10 @@ Download from [GitHub Releases](https://github.com/lililib/ai-session-search/rel
 - Windows x64 portable: `AI.Session.Search-win32-x64-<version>.zip`
 
 The desktop client requires no Node.js installation. It displays the interface immediately, scans
-sessions in the background, and reports indexing progress. Its database uses the current user's
-system application-data directory and contains no developer-specific paths.
+sessions in the background, and reports indexing progress. Web and desktop use the same database
+in the current user's system application-data directory, so indexes, favorites, collections,
+renames, and settings are shared. Existing desktop-only metadata is migrated automatically and the
+legacy directory is left intact as a backup.
 
 Current packages are unsigned, so Gatekeeper or SmartScreen may show a first-launch warning.
 The Windows build is portable: extract the ZIP and run `ai-session-search.exe`; no installer is
@@ -39,7 +41,9 @@ The Windows package requires 64-bit Windows 10 or Windows 11; Windows 7/8/8.1 ar
 - macOS integration with Terminal, iTerm2, Warp, and custom terminal/shell paths
 - Windows integration with Windows Terminal, PowerShell, Command Prompt, and custom executables
 - Resizable sidebar with persisted width
+- App-local shortcuts: `Cmd/Ctrl+K`, `Cmd/Ctrl+F`, or `/` focuses search; `Esc` dismisses the active editor or dialog
 - Background incremental indexing and filesystem watching
+- Desktop indexing runs in a background worker with bounded database batches to keep the window responsive
 - Shared web/desktop session-source settings with custom paths, enable/disable controls, and live rescanning
 - Automatic English/Simplified Chinese UI; no API key or cloud database required
 
@@ -87,6 +91,10 @@ The default URL is `http://localhost:3411`.
 | `--data-dir <path>` | `AI_SESSION_DATA_DIR` / `XDG_DATA_HOME` | Platform app data |
 | `--providers <ids>` | `AI_SESSION_PROVIDERS` | `auto` |
 | `--no-watch` | — | Watching enabled |
+
+The web and desktop clients both honor `--data-dir` and `AI_SESSION_DATA_DIR`. Their shared default
+is `~/Library/Application Support/ai-session-search` on macOS,
+`%LOCALAPPDATA%\\ai-session-search` on Windows, and `~/.local/share/ai-session-search` on Linux.
 
 Examples:
 

@@ -21,6 +21,12 @@ import {
   renderResumeCommand,
 } from "../shared/resumeCommand.ts";
 import type { Translator } from "./i18n/index.ts";
+import { IndexingStatus } from "./components/IndexingStatus.tsx";
+import {
+  ProviderSourcesDialog,
+  type ProviderSourceDraft,
+} from "./components/ProviderSourcesDialog.tsx";
+import { SearchBox } from "./components/SearchBox.tsx";
 import {
   commandDialectForTerminal,
   defaultTerminalSettings,
@@ -33,6 +39,7 @@ import {
   SIDEBAR_STORAGE_KEY,
 } from "./sidebarWidth.ts";
 import { splitTextByLiteralQuery } from "./textHighlight.ts";
+import { useAppKeyboardShortcuts, useDialogFocus } from "./useAppKeyboardShortcuts.ts";
 
 type Project = { provider: ProviderId; projectPath: string; count: number };
 type SessionDetail = { session: SessionSummary; messages: NormalizedMessage[] };
@@ -42,7 +49,6 @@ type AppStatus = {
   sync: SyncProgress;
   runtimePlatform: RuntimePlatform;
 };
-type ProviderSourceDraft = { enabled: boolean; home: string };
 type ActiveSearchMatch = {
   sessionKey: string;
   messageIndex: number;
@@ -164,6 +170,10 @@ export const App = () => {
   const [notice, setNotice] = useState<string | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(initialSidebarWidth);
   const appShellRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const providerSourcesTriggerRef = useRef<HTMLButtonElement>(null);
+  const providerSourcesCloseRef = useRef<HTMLButtonElement>(null);
+  const providerSourcesWasOpenRef = useRef(false);
   const sidebarWidthRef = useRef(sidebarWidth);
   const resizingSidebarRef = useRef(false);
   const messageRefs = useRef(new Map<number, HTMLElement>());
@@ -175,6 +185,30 @@ export const App = () => {
     runtimePlatform,
     terminalSettings.shellPath,
   );
+  const searchShortcutLabel = runtimePlatform === "darwin" ? "⌘K" : "Ctrl K";
+  const shortcutSurfaceOpen =
+    showProviderSources || editingResumeCommand || editingTitle || collectionEditor !== null;
+
+  const dismissActiveSurface = useCallback((): boolean => {
+    if (showProviderSources) setShowProviderSources(false);
+    else if (editingResumeCommand) setEditingResumeCommand(false);
+    else if (editingTitle) setEditingTitle(false);
+    else if (collectionEditor !== null) setCollectionEditor(null);
+    else if (error !== null) setError(null);
+    else if (notice !== null) setNotice(null);
+    else if (query !== "") setQuery("");
+    else if (document.activeElement === searchInputRef.current) searchInputRef.current?.blur();
+    else return false;
+    return true;
+  }, [showProviderSources, editingResumeCommand, editingTitle, collectionEditor, error, notice, query]);
+
+  useDialogFocus(
+    showProviderSources,
+    providerSourcesTriggerRef,
+    providerSourcesCloseRef,
+    providerSourcesWasOpenRef,
+  );
+  useAppKeyboardShortcuts({ searchInputRef, surfaceOpen: shortcutSurfaceOpen, dismissActiveSurface });
 
   const applyProviderSourceSettings = (settings: ProviderSourceSetting[]): void => {
     setProviderSourceSettings(settings);
@@ -573,14 +607,6 @@ export const App = () => {
   );
   const collectionNames = new Map(collections.map((collection) => [collection.id, collection.name]));
   const syncProgress = status?.sync ?? null;
-  const providerFileProgress =
-    syncProgress !== null && syncProgress.totalFiles > 0
-      ? syncProgress.processedFiles / syncProgress.totalFiles
-      : 0;
-  const overallSyncProgress =
-    syncProgress === null
-      ? 0
-      : syncProgress.completedProviders + providerFileProgress;
 
   const applySidebarWidth = (requestedWidth: number): number => {
     const width = clampSidebarWidth(requestedWidth, window.innerWidth);
@@ -625,44 +651,15 @@ export const App = () => {
           </a>
         </header>
 
-        {syncProgress?.running === true && (
-          <div className="indexing-status" role="status" aria-live="polite">
-            <div className="indexing-status-copy">
-              <strong>{t("indexing.title")}</strong>
-              <span>
-                {syncProgress.currentProvider === null
-                  ? t("indexing.preparing")
-                  : t("indexing.provider", {
-                      provider: providerLabel(syncProgress.currentProvider),
-                    })}
-              </span>
-            </div>
-            <progress value={overallSyncProgress} max={Math.max(syncProgress.totalProviders, 1)} />
-            <small>
-              {t("indexing.progress", {
-                completed: syncProgress.completedProviders,
-                total: syncProgress.totalProviders,
-              })}
-              {syncProgress.totalFiles > 0
-                ? ` · ${t("indexing.files", {
-                    processed: syncProgress.processedFiles,
-                    total: syncProgress.totalFiles,
-                  })}`
-                : ""}
-            </small>
-          </div>
-        )}
+        {syncProgress?.running === true && <IndexingStatus progress={syncProgress} t={t} />}
 
-        <div className="search-box">
-          <span>⌕</span>
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder={t("search.placeholder")}
-            autoFocus
-          />
-          {query !== "" && <button onClick={() => setQuery("")}>×</button>}
-        </div>
+        <SearchBox
+          inputRef={searchInputRef}
+          query={query}
+          shortcutLabel={searchShortcutLabel}
+          t={t}
+          onQueryChange={setQuery}
+        />
 
         <div className="filters">
           <select value={provider} onChange={(event) => setProvider(event.target.value as ProviderId | "all") }>
@@ -815,7 +812,9 @@ export const App = () => {
               <span key={item.provider}>{providerLabel(item.provider)} {status.counts[item.provider]}</span>
             ))}
           <button
+            ref={providerSourcesTriggerRef}
             onClick={() => setShowProviderSources(true)}
+            title={t("sources.openShortcutHint")}
           >
             {t("sources.open")}
           </button>
@@ -1136,96 +1135,19 @@ export const App = () => {
       </main>
 
       {showProviderSources && (
-        <div className="modal-backdrop" onMouseDown={() => setShowProviderSources(false)}>
-          <section
-            className="source-settings-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="source-settings-title"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <header>
-              <div>
-                <h2 id="source-settings-title">{t("sources.title")}</h2>
-                <p>{t("sources.description")}</p>
-              </div>
-              <button
-                className="dialog-close"
-                onClick={() => setShowProviderSources(false)}
-                aria-label={t("common.close")}
-              >
-                ×
-              </button>
-            </header>
-            <div className="source-settings-list">
-              {providerSourceSettings.map((setting) => {
-                const draft = providerSourceDrafts[setting.provider] ?? {
-                  enabled: setting.enabled,
-                  home: setting.home,
-                };
-                const saving = savingProviderSource === setting.provider;
-                const changed = draft.enabled !== setting.enabled || draft.home.trim() !== setting.home;
-                return (
-                  <article className="source-setting" key={setting.provider}>
-                    <div className="source-setting-heading">
-                      <span className="provider-dot" style={{ background: providerColor(setting.provider) }} />
-                      <strong>{providerLabel(setting.provider)}</strong>
-                      <code>{setting.provider}</code>
-                      <label className="source-enabled">
-                        <input
-                          type="checkbox"
-                          checked={draft.enabled}
-                          onChange={(event) => setProviderSourceDrafts((current) => ({
-                            ...current,
-                            [setting.provider]: { ...draft, enabled: event.target.checked },
-                          }))}
-                        />
-                        {t("sources.enabled")}
-                      </label>
-                    </div>
-                    <div className="source-path-row">
-                      <input
-                        value={draft.home}
-                        onChange={(event) => setProviderSourceDrafts((current) => ({
-                          ...current,
-                          [setting.provider]: { ...draft, home: event.target.value },
-                        }))}
-                        placeholder={setting.defaultHome}
-                        spellCheck={false}
-                      />
-                      <button
-                        onClick={() => setProviderSourceDrafts((current) => ({
-                          ...current,
-                          [setting.provider]: { ...draft, home: setting.defaultHome },
-                        }))}
-                        disabled={draft.home === setting.defaultHome}
-                      >
-                        {t("sources.restoreDefault")}
-                      </button>
-                      <button
-                        className="primary"
-                        onClick={() => void saveProviderSource(setting)}
-                        disabled={!changed || draft.home.trim() === "" || saving}
-                      >
-                        {saving ? t("sources.saving") : t("common.save")}
-                      </button>
-                    </div>
-                    <div className="source-setting-meta">
-                      <span className={setting.detected ? "detected" : "missing"}>
-                        {setting.detected ? t("sources.detected") : t("sources.notDetected")}
-                      </span>
-                      <span>{t("sources.sessionCount", { count: setting.sessionCount })}</span>
-                      {setting.customized && <span>{t("sources.customized")}</span>}
-                      <code title={setting.defaultHome}>
-                        {t("sources.defaultPath", { path: setting.defaultHome })}
-                      </code>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-          </section>
-        </div>
+        <ProviderSourcesDialog
+          settings={providerSourceSettings}
+          drafts={providerSourceDrafts}
+          savingProvider={savingProviderSource}
+          closeButtonRef={providerSourcesCloseRef}
+          t={t}
+          onClose={() => setShowProviderSources(false)}
+          onDraftChange={(provider, draft) => setProviderSourceDrafts((current) => ({
+            ...current,
+            [provider]: draft,
+          }))}
+          onSave={(setting) => void saveProviderSource(setting)}
+        />
       )}
 
       {loading && <div className="loading-bar" />}

@@ -3,13 +3,11 @@ import { join, resolve } from "node:path";
 import { PROVIDER_IDS, type ProviderId } from "../../shared/types.ts";
 import { createClaudeProvider } from "./claude.ts";
 import { createCodexProvider } from "./codex.ts";
-import {
-  createAntigravityProvider,
-  createCopilotProvider,
-  createCursorProvider,
-  createKimiProvider,
-  createOpenCodeProvider,
-} from "./additional.ts";
+import { createAntigravityProvider } from "./antigravity.ts";
+import { createCopilotProvider } from "./copilot.ts";
+import { createCursorProvider } from "./cursor.ts";
+import { createKimiProvider } from "./kimi.ts";
+import { createOpenCodeProvider } from "./opencode.ts";
 import type { ConversationProvider } from "./types.ts";
 
 type ProviderRegistration = {

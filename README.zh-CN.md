@@ -18,8 +18,9 @@ SQLite FTS5 trigram 索引搜索自然语言、代码、路径、错误信息和
 - macOS Intel：`darwin-x64.zip`
 - Windows x64 便携版：`AI.Session.Search-win32-x64-<version>.zip`
 
-客户端不需要安装 Node.js。启动后会立即显示界面，在后台扫描会话并展示索引进度；
-数据库存放在当前用户的系统应用数据目录，不包含开发者机器路径。
+客户端不需要安装 Node.js。启动后会立即显示界面，在后台扫描会话并展示索引进度。
+Web 和桌面端使用当前用户系统应用数据目录中的同一个数据库，因此索引、收藏、收藏夹、
+重命名和设置可以共用。已有的桌面端专用元数据会自动迁移，旧目录会保留作为备份。
 
 当前发布包尚未签名，首次打开可能出现 Gatekeeper 或 SmartScreen 提示。Windows 版本为
 便携版：解压 ZIP 后运行 `ai-session-search.exe`，无需安装。“在终端中恢复”支持 macOS
@@ -36,7 +37,9 @@ Windows 包要求 64 位 Windows 10 或 Windows 11，不支持 Windows 7/8/8.1�
 - macOS 支持 Terminal、iTerm2、Warp 和自定义终端/Shell
 - Windows 支持 Windows Terminal、PowerShell、命令提示符和自定义可执行文件
 - 侧边栏可拖拽调整宽度，并记住用户设置
+- 页面内快捷键：`Cmd/Ctrl+K`、`Cmd/Ctrl+F` 或 `/` 聚焦搜索，`Esc` 关闭当前编辑器或弹层
 - 后台增量索引和文件变化监听
+- 桌面端使用后台 Worker 和有限大小的数据库批次建立索引，避免首次扫描阻塞窗口
 - Web/桌面端共用会话来源设置，支持自定义路径、启用/禁用和即时重新扫描
 - 简体中文/英文界面自动切换；无需 API Key 或云端数据库
 
@@ -82,6 +85,10 @@ corepack pnpm start
 | `--data-dir <path>` | `AI_SESSION_DATA_DIR` / `XDG_DATA_HOME` | 平台应用数据目录 |
 | `--providers <ids>` | `AI_SESSION_PROVIDERS` | `auto` |
 | `--no-watch` | — | 默认监听文件变化 |
+
+Web 和桌面端都支持 `--data-dir` 与 `AI_SESSION_DATA_DIR`。两端共用的默认目录在 macOS 为
+`~/Library/Application Support/ai-session-search`，Windows 为
+`%LOCALAPPDATA%\\ai-session-search`，Linux 为 `~/.local/share/ai-session-search`。
 
 示例：
 

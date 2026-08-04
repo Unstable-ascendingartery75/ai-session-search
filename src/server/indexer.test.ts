@@ -318,6 +318,51 @@ describe("session indexer", () => {
     }
   });
 
+  test("writes large provider indexes in bounded batches", async () => {
+    const root = await makeTempDirectory();
+    const home = join(root, "provider");
+    await mkdir(home, { recursive: true });
+    const files = Array.from({ length: 45 }, (_, index) => ({
+      provider: "cursor" as const,
+      path: join(home, `${index}.jsonl`),
+      mtimeMs: index + 1,
+      size: 1,
+    }));
+    const provider: ConversationProvider = {
+      id: "cursor",
+      home,
+      sessionRoots: [home],
+      discover: async () => files,
+      parse: async (file) => ({
+        sessionKey: `cursor:${file.path}`,
+        sourceSessionId: file.path,
+        provider: "cursor",
+        filePath: file.path,
+        projectPath: null,
+        originalTitle: file.path,
+        startedAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        messages: [{
+          index: 0,
+          role: "assistant",
+          content: `content ${file.path}`,
+          timestamp: "2026-01-01T00:00:00.000Z",
+        }],
+      }),
+    };
+    const database = new SearchDatabase(join(root, "search.db"));
+    const batchWrite = vi.spyOn(database, "applyProviderIndexBatch");
+    const indexer = new SessionIndexer(database, [provider]);
+    try {
+      await expect(indexer.syncProvider("cursor")).resolves.toMatchObject({ indexed: 45 });
+      expect(batchWrite).toHaveBeenCalledTimes(3);
+      expect(batchWrite.mock.calls.map(([options]) => options.upserts.length)).toEqual([20, 20, 5]);
+    } finally {
+      indexer.close();
+      database.close();
+    }
+  });
+
   test("removes stale indexed sessions when the configured path is unavailable", async () => {
     const root = await makeTempDirectory();
     const database = new SearchDatabase(join(root, "search.db"));

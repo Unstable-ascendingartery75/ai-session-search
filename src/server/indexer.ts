@@ -13,7 +13,20 @@ export type SyncResult = {
   errors: number;
 };
 
-export class SessionIndexer {
+const INDEX_WRITE_BATCH_SIZE = 20;
+
+const yieldToEventLoop = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
+
+export interface SessionIndexService {
+  syncProgress(): SyncProgress;
+  status(): Promise<ProviderStatus[]>;
+  syncAll(): Promise<SyncResult[]>;
+  reconfigure(providers: ConversationProvider[], watch: boolean): Promise<SyncResult[]>;
+  startWatching(): Promise<void>;
+  close(): void | Promise<void>;
+}
+
+export class SessionIndexer implements SessionIndexService {
   readonly #database: SearchDatabase;
   #providers: ConversationProvider[];
   readonly #watchers: FSWatcher[] = [];
@@ -185,18 +198,36 @@ export class SessionIndexer {
       }
     }
 
-    const batchResult = this.#database.applyProviderIndexBatch({
-      provider: provider.id,
-      visibleFiles,
-      removeSessionKeys,
-      upserts: [...pendingUpserts.values()],
-    });
-    for (const failure of batchResult.errors) {
-      process.stderr.write(`[${provider.id}] Failed to index ${failure.path}: ${failure.error}\n`);
+    const upserts = [...pendingUpserts.values()];
+    const retainedSessionKeys = new Set(upserts.map((entry) => entry.session.sessionKey));
+    const batches = upserts.length === 0
+      ? [[]]
+      : Array.from(
+          { length: Math.ceil(upserts.length / INDEX_WRITE_BATCH_SIZE) },
+          (_, index) => upserts.slice(index * INDEX_WRITE_BATCH_SIZE, (index + 1) * INDEX_WRITE_BATCH_SIZE),
+        );
+    let batchIndexed = 0;
+    let batchRemoved = 0;
+    let batchErrors = 0;
+    for (const [index, batch] of batches.entries()) {
+      const batchResult = this.#database.applyProviderIndexBatch({
+        provider: provider.id,
+        visibleFiles: index === 0 ? visibleFiles : null,
+        removeSessionKeys: index === 0 ? removeSessionKeys : new Set(),
+        retainSessionKeys: retainedSessionKeys,
+        upserts: batch,
+      });
+      batchIndexed += batchResult.indexed;
+      batchRemoved += batchResult.removed;
+      batchErrors += batchResult.errors.length;
+      for (const failure of batchResult.errors) {
+        process.stderr.write(`[${provider.id}] Failed to index ${failure.path}: ${failure.error}\n`);
+      }
+      if (index + 1 < batches.length) await yieldToEventLoop();
     }
     if (
-      batchResult.indexed > 0 ||
-      batchResult.removed > 0 ||
+      batchIndexed > 0 ||
+      batchRemoved > 0 ||
       removeSessionKeys.size > 0
     ) {
       this.#incrementRevision();
@@ -204,10 +235,10 @@ export class SessionIndexer {
     return {
       provider: providerId,
       discovered: files.length,
-      indexed: batchResult.indexed,
+      indexed: batchIndexed,
       unchanged,
-      removed: batchResult.removed,
-      errors: errors + batchResult.errors.length,
+      removed: batchRemoved,
+      errors: errors + batchErrors,
     };
   }
 

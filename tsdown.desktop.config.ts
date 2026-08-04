@@ -1,7 +1,7 @@
 import { defineConfig } from "tsdown";
 
 export default defineConfig({
-  entry: "src/desktop/main.ts",
+  entry: ["src/desktop/main.ts", "src/desktop/indexWorker.ts"],
   format: "cjs",
   platform: "node",
   outDir: "dist/desktop",

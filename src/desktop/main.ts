@@ -1,7 +1,10 @@
 import { join } from "node:path";
+import { Worker } from "node:worker_threads";
 import { app, BrowserWindow, dialog, shell } from "electron";
 import { resolveConfig } from "../server/config.ts";
 import { startServer, type ServerRuntime } from "../server/runtime.ts";
+import { desktopDataDirectoryOption, migrateLegacyDesktopDatabase } from "./dataDirectory.ts";
+import { WorkerSessionIndexer } from "./workerIndexer.ts";
 
 let mainWindow: BrowserWindow | null = null;
 let runtime: ServerRuntime | null = null;
@@ -9,13 +12,27 @@ let closing = false;
 
 const createWindow = async (): Promise<void> => {
   if (runtime === null) {
+    const dataDir = desktopDataDirectoryOption(process.argv);
     const config = resolveConfig({
-      dataDir: app.getPath("userData"),
+      ...(dataDir === undefined ? {} : { dataDir }),
       hostname: "127.0.0.1",
       port: "0",
     });
+    const migration = await migrateLegacyDesktopDatabase(app.getPath("userData"), config.dataDir);
+    if (migration !== "skipped") {
+      process.stdout.write(`[desktop] Legacy database ${migration} into ${config.dataDir}\n`);
+    }
     runtime = await startServer(config, {
       clientDirectory: join(app.getAppPath(), "dist", "client"),
+      createIndexer: (_database, providers) => new WorkerSessionIndexer(
+        new Worker(join(__dirname, "indexWorker.cjs"), {
+          workerData: {
+            dataDir: config.dataDir,
+            providers: providers.map(({ id, home }) => ({ id, home })),
+          },
+        }),
+        providers,
+      ),
     });
   }
 

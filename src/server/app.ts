@@ -9,7 +9,7 @@ import { renderResumeCommand } from "../shared/resumeCommand.ts";
 import { commandDialectForTerminal, normalizeRuntimePlatform } from "../shared/terminal.ts";
 import type { AppConfig } from "./config.ts";
 import { SearchDatabase } from "./database.ts";
-import { SessionIndexer } from "./indexer.ts";
+import type { SessionIndexService } from "./indexer.ts";
 import { createEnabledProviders } from "./providers/registry.ts";
 import type { TerminalLauncher } from "./terminalLauncher.ts";
 
@@ -74,7 +74,7 @@ const isTrustedLaunchRequest = (context: Context): boolean => {
 
 export const createApp = (options: {
   database: SearchDatabase;
-  indexer: SessionIndexer;
+  indexer: SessionIndexService;
   config: AppConfig;
   terminalLauncher: Pick<TerminalLauncher, "launch">;
   clientDirectory?: string;

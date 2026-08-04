@@ -5,7 +5,7 @@ import { serve, type ServerType } from "@hono/node-server";
 import { createApp } from "./app.ts";
 import type { AppConfig } from "./config.ts";
 import { SearchDatabase } from "./database.ts";
-import { SessionIndexer, type SyncResult } from "./indexer.ts";
+import { SessionIndexer, type SessionIndexService, type SyncResult } from "./indexer.ts";
 import { createEnabledProviders } from "./providers/registry.ts";
 import type { ConversationProvider } from "./providers/types.ts";
 import { TerminalLauncher } from "./terminalLauncher.ts";
@@ -24,7 +24,11 @@ const closeServer = (server: ServerType): Promise<void> =>
 
 export const startServer = async (
   config: AppConfig,
-  options: { clientDirectory?: string; providers?: ConversationProvider[] } = {},
+  options: {
+    clientDirectory?: string;
+    providers?: ConversationProvider[];
+    createIndexer?: (database: SearchDatabase, providers: ConversationProvider[]) => SessionIndexService;
+  } = {},
 ): Promise<ServerRuntime> => {
   await mkdir(config.dataDir, { recursive: true });
   const database = new SearchDatabase(join(config.dataDir, "search.db"));
@@ -39,7 +43,7 @@ export const startServer = async (
     if (!setting.enabled) database.removeMissingFiles(setting.provider, new Set());
   }
   const providers = options.providers ?? createEnabledProviders(configuredProviders, configuredHomes);
-  const indexer = new SessionIndexer(database, providers);
+  const indexer = options.createIndexer?.(database, providers) ?? new SessionIndexer(database, providers);
   const terminalLauncher = new TerminalLauncher(config.dataDir);
 
   try {
@@ -84,14 +88,14 @@ export const startServer = async (
       close: async () => {
         if (closed) return;
         closed = true;
-        indexer.close();
+        await indexer.close();
         await closeServer(server);
         await initialSync.catch(() => undefined);
         database.close();
       },
     };
   } catch (error) {
-    indexer.close();
+    await indexer.close();
     database.close();
     throw error;
   }
