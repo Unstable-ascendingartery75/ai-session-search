@@ -121,6 +121,7 @@ export class SessionIndexer {
 
     const files = await provider.discover();
     const parserVersion = provider.parserVersion ?? 1;
+    const indexedFiles = this.#database.getIndexedFiles(provider.id);
     onProgress?.(0, files.length);
     const visibleFiles = new Set(files.map((file) => file.path));
     let indexed = 0;
@@ -128,12 +129,18 @@ export class SessionIndexer {
     let errors = 0;
     const claimedSessionKeys = new Map<string, { path: string; result: "indexed" | "unchanged" }>();
     const conflictedSessionKeys = new Set<string>();
+    const removeSessionKeys = new Set<string>();
+    const pendingUpserts = new Map<string, {
+      session: NonNullable<Awaited<ReturnType<ConversationProvider["parse"]>>>;
+      file: (typeof files)[number];
+      parserVersion: number;
+    }>();
 
     let processed = 0;
     for (const file of files) {
       if (this.#closed) break;
       try {
-        const existing = this.#database.getIndexedFile(file.path);
+        const existing = indexedFiles.get(file.path) ?? null;
         const isUnchanged =
           existing !== null &&
           Math.trunc(existing.mtimeMs) === Math.trunc(file.mtimeMs) &&
@@ -145,7 +152,8 @@ export class SessionIndexer {
 
         const claimed = claimedSessionKeys.get(sessionKey);
         if (claimed !== undefined && claimed.path !== file.path) {
-          this.#database.removeSessionIndex(sessionKey);
+          removeSessionKeys.add(sessionKey);
+          pendingUpserts.delete(sessionKey);
           claimedSessionKeys.delete(sessionKey);
           conflictedSessionKeys.add(sessionKey);
           if (claimed.result === "indexed") indexed -= 1;
@@ -161,7 +169,7 @@ export class SessionIndexer {
           unchanged += 1;
           claimedSessionKeys.set(sessionKey, { path: file.path, result: "unchanged" });
         } else if (session !== null) {
-          this.#database.upsertSession(session, file, parserVersion);
+          pendingUpserts.set(sessionKey, { session, file, parserVersion });
           indexed += 1;
           claimedSessionKeys.set(sessionKey, { path: file.path, result: "indexed" });
         }
@@ -174,8 +182,23 @@ export class SessionIndexer {
       }
     }
 
-    const removed = this.#database.removeMissingFiles(provider.id, visibleFiles);
-    return { provider: providerId, discovered: files.length, indexed, unchanged, removed, errors };
+    const batchResult = this.#database.applyProviderIndexBatch({
+      provider: provider.id,
+      visibleFiles,
+      removeSessionKeys,
+      upserts: [...pendingUpserts.values()],
+    });
+    for (const failure of batchResult.errors) {
+      process.stderr.write(`[${provider.id}] Failed to index ${failure.path}: ${failure.error}\n`);
+    }
+    return {
+      provider: providerId,
+      discovered: files.length,
+      indexed: batchResult.indexed,
+      unchanged,
+      removed: batchResult.removed,
+      errors: errors + batchResult.errors.length,
+    };
   }
 
   async startWatching(): Promise<void> {

@@ -207,6 +207,28 @@ export class SearchDatabase {
     };
   }
 
+  getIndexedFiles(provider: ProviderId): Map<string, {
+    sessionKey: string;
+    mtimeMs: number;
+    size: number;
+    parserVersion: number;
+  }> {
+    const rows = this.#db
+      .prepare(
+        "SELECT session_key, file_path, file_mtime_ms, file_size, parser_version FROM sessions WHERE provider = ? ORDER BY file_path",
+      )
+      .all(provider) as SqlRow[];
+    return new Map(rows.map((row) => [
+      stringColumn(row, "file_path"),
+      {
+        sessionKey: stringColumn(row, "session_key"),
+        mtimeMs: numberColumn(row, "file_mtime_ms"),
+        size: numberColumn(row, "file_size"),
+        parserVersion: numberColumn(row, "parser_version"),
+      },
+    ]));
+  }
+
   removeSessionIndex(sessionKey: string): void {
     this.#db.exec("BEGIN IMMEDIATE");
     try {
@@ -220,6 +242,27 @@ export class SearchDatabase {
   }
 
   upsertSession(session: ParsedSession, file: SessionFile, parserVersion = 1): void {
+    const result = this.applyProviderIndexBatch({
+      provider: session.provider,
+      visibleFiles: null,
+      removeSessionKeys: new Set(),
+      upserts: [{ session, file, parserVersion }],
+    });
+    const failure = result.errors[0];
+    if (failure !== undefined) throw new Error(failure.error);
+  }
+
+  applyProviderIndexBatch(options: {
+    provider: ProviderId;
+    visibleFiles: ReadonlySet<string> | null;
+    removeSessionKeys: ReadonlySet<string>;
+    upserts: Array<{ session: ParsedSession; file: SessionFile; parserVersion: number }>;
+  }): { indexed: number; removed: number; errors: Array<{ path: string; error: string }> } {
+    for (const { session, file } of options.upserts) {
+      if (session.provider !== options.provider || file.provider !== options.provider) {
+        throw new Error(`Cannot apply ${session.provider}/${file.provider} session to ${options.provider} batch`);
+      }
+    }
     const insertSession = this.#db.prepare(`
       INSERT INTO sessions (
         session_key, source_session_id, provider, file_path, project_path,
@@ -246,42 +289,89 @@ export class SearchDatabase {
         session_key, provider, project_path, role, timestamp, message_index, content
       ) VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
+    const customTitle = this.#db.prepare(
+      "SELECT custom_title FROM session_metadata WHERE session_key = ?",
+    );
+    const deleteSession = this.#db.prepare("DELETE FROM sessions WHERE session_key = ?");
+    const existingRows = options.visibleFiles === null
+      ? []
+      : this.#db
+          .prepare("SELECT session_key, file_path FROM sessions WHERE provider = ?")
+          .all(options.provider) as SqlRow[];
+    const upsertSessionKeys = new Set(options.upserts.map((entry) => entry.session.sessionKey));
+    const missingSessionKeys = new Set(existingRows.flatMap((row) => {
+      const sessionKey = stringColumn(row, "session_key");
+      return options.visibleFiles?.has(stringColumn(row, "file_path")) === false &&
+        !upsertSessionKeys.has(sessionKey)
+        ? [sessionKey]
+        : [];
+    }));
+    const deleteSessionKeys = new Set([...options.removeSessionKeys, ...missingSessionKeys]);
+    const errors: Array<{ path: string; error: string }> = [];
+    let indexed = 0;
+    const indexedAt = Date.now();
 
     this.#db.exec("BEGIN IMMEDIATE");
     try {
-      insertSession.run(
-        session.sessionKey,
-        session.sourceSessionId,
-        session.provider,
-        session.filePath,
-        session.projectPath,
-        session.originalTitle,
-        session.startedAt,
-        session.updatedAt,
-        session.messages.length,
-        Math.trunc(file.mtimeMs),
-        file.size,
-        parserVersion,
-        Date.now(),
-      );
-      deleteFts.run(session.sessionKey);
-      for (const message of session.messages) {
-        insertFts.run(
-          session.sessionKey,
-          session.provider,
-          session.projectPath,
-          message.role,
-          message.timestamp,
-          message.index,
-          message.content,
-        );
+      for (const sessionKey of deleteSessionKeys) {
+        deleteSession.run(sessionKey);
+        deleteFts.run(sessionKey);
       }
-      this.#insertTitleFts(insertFts, session.sessionKey);
+      for (const { session, file, parserVersion } of options.upserts) {
+        this.#db.exec("SAVEPOINT session_upsert");
+        try {
+          insertSession.run(
+            session.sessionKey,
+            session.sourceSessionId,
+            session.provider,
+            session.filePath,
+            session.projectPath,
+            session.originalTitle,
+            session.startedAt,
+            session.updatedAt,
+            session.messages.length,
+            Math.trunc(file.mtimeMs),
+            file.size,
+            parserVersion,
+            indexedAt,
+          );
+          deleteFts.run(session.sessionKey);
+          for (const message of session.messages) {
+            insertFts.run(
+              session.sessionKey,
+              session.provider,
+              session.projectPath,
+              message.role,
+              message.timestamp,
+              message.index,
+              message.content,
+            );
+          }
+          const metadata = customTitle.get(session.sessionKey) as SqlRow | undefined;
+          const savedTitle = nullableStringColumn(metadata ?? {}, "custom_title");
+          insertFts.run(
+            session.sessionKey,
+            session.provider,
+            session.projectPath,
+            "title",
+            session.updatedAt,
+            -1,
+            savedTitle === null ? session.originalTitle : `${savedTitle}\n${session.originalTitle}`,
+          );
+          this.#db.exec("RELEASE SAVEPOINT session_upsert");
+          indexed += 1;
+        } catch (error) {
+          this.#db.exec("ROLLBACK TO SAVEPOINT session_upsert");
+          this.#db.exec("RELEASE SAVEPOINT session_upsert");
+          errors.push({ path: file.path, error: String(error) });
+        }
+      }
       this.#db.exec("COMMIT");
     } catch (error) {
       this.#db.exec("ROLLBACK");
       throw error;
     }
+    return { indexed, removed: missingSessionKeys.size, errors };
   }
 
   #insertTitleFts(statement: ReturnType<DatabaseSync["prepare"]>, sessionKey: string): void {

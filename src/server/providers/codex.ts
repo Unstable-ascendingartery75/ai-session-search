@@ -4,7 +4,9 @@ import type { NormalizedMessage, ParsedSession } from "../../shared/types.ts";
 import {
   compactTitle,
   discoverJsonlFiles,
+  FILE_IO_CONCURRENCY,
   isRecord,
+  mapWithConcurrency,
   readFirstJsonlRecord,
   readJsonl,
   stringValue,
@@ -168,12 +170,14 @@ export const createCodexProvider = (home: string): ConversationProvider => {
         const current = newestBySession.get(id);
         if (current === undefined || file.mtimeMs > current.mtimeMs) newestBySession.set(id, file);
       }
-      const visibleFiles = [];
-      for (const file of newestBySession.values()) {
-        if (isSubagentSessionMeta(await readFirstJsonlRecord(file.path))) continue;
-        visibleFiles.push({ ...file, provider: "codex" as const });
-      }
-      return visibleFiles;
+      const visibleFiles = await mapWithConcurrency(
+        [...newestBySession.values()],
+        FILE_IO_CONCURRENCY,
+        async (file) => isSubagentSessionMeta(await readFirstJsonlRecord(file.path))
+          ? null
+          : { ...file, provider: "codex" as const },
+      );
+      return visibleFiles.filter((file) => file !== null);
     },
     parse: async (file) => parseCodexSession(file, await readSessionTitles(home)),
   };

@@ -86,6 +86,41 @@ describe("SearchDatabase", () => {
     expect(database.search({ query: "CallbackService" })[0]?.messageIndex).toBe(1);
   });
 
+  test("loads provider manifests and applies multiple session updates as one batch", async () => {
+    const database = await createDatabase();
+    const first = sampleSession();
+    const second: ParsedSession = {
+      ...sampleSession(),
+      sessionKey: "codex:session-2",
+      sourceSessionId: "session-2",
+      filePath: "/tmp/session-2.jsonl",
+      originalTitle: "第二个会话",
+      messages: [{
+        index: 0,
+        role: "user",
+        content: "批量索引关键字",
+        timestamp: "2026-01-02T00:00:00.000Z",
+      }],
+    };
+
+    const result = database.applyProviderIndexBatch({
+      provider: "codex",
+      visibleFiles: new Set([first.filePath, second.filePath]),
+      removeSessionKeys: new Set(),
+      upserts: [
+        { session: first, file: { provider: "codex", path: first.filePath, mtimeMs: 1, size: 10 }, parserVersion: 1 },
+        { session: second, file: { provider: "codex", path: second.filePath, mtimeMs: 2, size: 20 }, parserVersion: 1 },
+      ],
+    });
+
+    expect(result).toEqual({ indexed: 2, removed: 0, errors: [] });
+    expect(database.getIndexedFiles("codex")).toEqual(new Map([
+      [first.filePath, { sessionKey: first.sessionKey, mtimeMs: 1, size: 10, parserVersion: 1 }],
+      [second.filePath, { sessionKey: second.sessionKey, mtimeMs: 2, size: 20, parserVersion: 1 }],
+    ]));
+    expect(database.search({ query: "批量索引关键字" })[0]?.sessionKey).toBe(second.sessionKey);
+  });
+
   test("searches sessions by full or partial session ID", async () => {
     const database = await createDatabase();
     const sessionId = "019fc543-bed2-7e21-bc69-35cb2091fcae";

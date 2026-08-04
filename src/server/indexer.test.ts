@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type { ParsedSession } from "../shared/types.ts";
 import { SearchDatabase } from "./database.ts";
 import { SessionIndexer } from "./indexer.ts";
@@ -269,6 +269,44 @@ describe("session indexer", () => {
     try {
       await indexer.reconfigure([emptyCodexProvider(join(root, "second"))], false);
       expect(await indexer.status()).toMatchObject([{ home: join(root, "second") }]);
+    } finally {
+      indexer.close();
+      database.close();
+    }
+  });
+
+  test("loads the existing provider manifest once instead of querying every file", async () => {
+    const root = await makeTempDirectory();
+    const home = join(root, "provider");
+    const path = join(home, "session.jsonl");
+    await mkdir(home, { recursive: true });
+    await writeFile(path, "session");
+    const info = await stat(path);
+    const provider: ConversationProvider = {
+      id: "pi",
+      home,
+      sessionRoots: [home],
+      discover: async () => [{ provider: "pi", path, mtimeMs: info.mtimeMs, size: info.size }],
+      parse: async () => ({
+        sessionKey: "pi:session",
+        sourceSessionId: "session",
+        provider: "pi",
+        filePath: path,
+        projectPath: null,
+        originalTitle: "Session",
+        startedAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        messages: [],
+      }),
+    };
+    const database = new SearchDatabase(join(root, "search.db"));
+    const perFileLookup = vi.spyOn(database, "getIndexedFile");
+    const manifestLookup = vi.spyOn(database, "getIndexedFiles");
+    const indexer = new SessionIndexer(database, [provider]);
+    try {
+      await indexer.syncProvider("pi");
+      expect(manifestLookup).toHaveBeenCalledOnce();
+      expect(perFileLookup).not.toHaveBeenCalled();
     } finally {
       indexer.close();
       database.close();

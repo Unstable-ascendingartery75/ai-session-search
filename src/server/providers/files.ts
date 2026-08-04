@@ -3,6 +3,32 @@ import { readdir, stat } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { createInterface } from "node:readline";
 
+export const FILE_IO_CONCURRENCY = 16;
+
+export const mapWithConcurrency = async <Input, Output>(
+  items: readonly Input[],
+  concurrency: number,
+  task: (item: Input, index: number) => Promise<Output>,
+): Promise<Output[]> => {
+  if (items.length === 0) return [];
+  const results = new Array<Output>(items.length);
+  let nextIndex = 0;
+  const worker = async (): Promise<void> => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      const item = items[index];
+      if (item !== undefined) results[index] = await task(item, index);
+    }
+  };
+  const workers = Array.from(
+    { length: Math.min(Math.max(Math.trunc(concurrency), 1), items.length) },
+    () => worker(),
+  );
+  await Promise.all(workers);
+  return results;
+};
+
 export const pathExists = async (path: string): Promise<boolean> => {
   try {
     await stat(path);
@@ -12,66 +38,58 @@ export const pathExists = async (path: string): Promise<boolean> => {
   }
 };
 
+const discoverMatchingFiles = async (
+  roots: readonly string[],
+  include: (path: string) => boolean,
+): Promise<Array<{ path: string; mtimeMs: number; size: number }>> => {
+  let directories = [...roots].sort();
+  const paths: string[] = [];
+  while (directories.length > 0) {
+    const directoryEntries = await mapWithConcurrency(
+      directories,
+      FILE_IO_CONCURRENCY,
+      async (directory) => {
+        try {
+          return { directory, entries: await readdir(directory, { withFileTypes: true }) };
+        } catch {
+          return { directory, entries: [] };
+        }
+      },
+    );
+    const nextDirectories: string[] = [];
+    for (const { directory, entries } of directoryEntries) {
+      for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+        if (entry.isSymbolicLink()) continue;
+        const child = join(directory, entry.name);
+        if (entry.isDirectory()) nextDirectories.push(child);
+        else if (entry.isFile() && include(child)) paths.push(child);
+      }
+    }
+    directories = nextDirectories.sort();
+  }
+
+  const files = await mapWithConcurrency(paths.sort(), FILE_IO_CONCURRENCY, async (path) => {
+    try {
+      const fileStat = await stat(path);
+      return { path, mtimeMs: fileStat.mtimeMs, size: fileStat.size };
+    } catch {
+      return null;
+    }
+  });
+  return files.filter((file) => file !== null);
+};
+
 export const discoverJsonlFiles = async (
   roots: readonly string[],
   include: (path: string) => boolean = () => true,
-): Promise<Array<{ path: string; mtimeMs: number; size: number }>> => {
-  const files: Array<{ path: string; mtimeMs: number; size: number }> = [];
-  const pending = [...roots];
-
-  while (pending.length > 0) {
-    const current = pending.pop();
-    if (current === undefined) continue;
-
-    let entries;
-    try {
-      entries = await readdir(current, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-
-    for (const entry of entries) {
-      if (entry.isSymbolicLink()) continue;
-      const child = join(current, entry.name);
-      if (entry.isDirectory()) {
-        pending.push(child);
-      } else if (entry.isFile() && extname(entry.name) === ".jsonl" && include(child)) {
-        const fileStat = await stat(child);
-        files.push({ path: child, mtimeMs: fileStat.mtimeMs, size: fileStat.size });
-      }
-    }
-  }
-
-  return files;
-};
+): Promise<Array<{ path: string; mtimeMs: number; size: number }>> =>
+  discoverMatchingFiles(roots, (path) => extname(path) === ".jsonl" && include(path));
 
 export const discoverFiles = async (
   roots: readonly string[],
   include: (path: string) => boolean,
-): Promise<Array<{ path: string; mtimeMs: number; size: number }>> => {
-  const files: Array<{ path: string; mtimeMs: number; size: number }> = [];
-  const pending = [...roots];
-  while (pending.length > 0) {
-    const current = pending.pop();
-    if (current === undefined) continue;
-    let entries;
-    try {
-      entries = await readdir(current, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const entry of entries) {
-      if (entry.isSymbolicLink()) continue;
-      const child = join(current, entry.name);
-      if (entry.isDirectory()) pending.push(child);
-      else if (entry.isFile() && include(child)) {
-        const fileStat = await stat(child);
-        files.push({ path: child, mtimeMs: fileStat.mtimeMs, size: fileStat.size });
-      }
-    }
-  }
-  return files;
-};
+): Promise<Array<{ path: string; mtimeMs: number; size: number }>> =>
+  discoverMatchingFiles(roots, include);
 
 export const readJsonl = async (
   path: string,

@@ -3,7 +3,9 @@ import type { NormalizedMessage, ParsedSession } from "../../shared/types.ts";
 import {
   compactTitle,
   discoverJsonlFiles,
+  FILE_IO_CONCURRENCY,
   isRecord,
+  mapWithConcurrency,
   readFirstJsonlRecord,
   readJsonl,
   stringValue,
@@ -104,11 +106,11 @@ export const createClaudeProvider = (home: string): ConversationProvider => {
     sessionRoots,
     discover: async () => {
       const files = await discoverJsonlFiles(sessionRoots);
-      const visibleFiles = await Promise.all(files.map(async (file) => {
+      const visibleFiles = await mapWithConcurrency(files, FILE_IO_CONCURRENCY, async (file) => {
         if (basename(file.path).startsWith("agent-")) return null;
         if (isClaudeSidechainRecord(await readFirstJsonlRecord(file.path))) return null;
         return { ...file, provider: "claude" as const };
-      }));
+      });
       return visibleFiles.filter((file) => file !== null);
     },
     parse: (file) => parseClaudeSession(home, file),
