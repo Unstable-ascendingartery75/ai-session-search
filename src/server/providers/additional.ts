@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { readFile, stat } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, join, relative, sep } from "node:path";
 import type { NormalizedMessage, ParsedSession, ProviderId } from "../../shared/types.ts";
 import { compactTitle, discoverFiles, discoverJsonlFiles, isRecord, readJsonl, stringValue } from "./files.ts";
 import type { ConversationProvider, SessionFile } from "./types.ts";
@@ -124,28 +124,19 @@ const parseNestedMessage = (record: Record<string, unknown>, session: MutableSes
   addMessage(session, message.role ?? record.role, message.content ?? message.text ?? record.content ?? record.text, record.timestamp ?? message.timestamp);
 };
 
-export const createPiProvider = (home: string): ConversationProvider =>
-  jsonlProvider({
-    id: "pi",
-    home,
-    roots: [join(home, "agent", "sessions"), join(home, "sessions")],
-    parseRecord: (record, session) => {
-      if (record.type === "session") {
-        session.id = stringValue(record.id) ?? session.id;
-        session.cwd = stringValue(record.cwd) ?? session.cwd;
-        return;
-      }
-      if (record.type === "message") parseNestedMessage(record, session);
-    },
-  });
-
 export const createCursorProvider = (home: string): ConversationProvider => {
-  const isSubagentPath = (path: string): boolean => path.split(sep).includes("subagents");
+  const isPrimaryTranscript = (path: string): boolean => {
+    const transcriptDirectory = dirname(path);
+    return (
+      basename(dirname(transcriptDirectory)) === "agent-transcripts" &&
+      basename(path, ".jsonl") === basename(transcriptDirectory)
+    );
+  };
   const provider = jsonlProvider({
     id: "cursor",
     home,
     roots: [join(home, "projects")],
-    include: (path) => path.includes(`${sep}agent-transcripts${sep}`) && !isSubagentPath(path),
+    include: isPrimaryTranscript,
     parseRecord: (record, session, file) => {
       parseNestedMessage(record, session);
       const parts = file.path.split(sep);
@@ -156,7 +147,8 @@ export const createCursorProvider = (home: string): ConversationProvider => {
   });
   return {
     ...provider,
-    parse: (file) => isSubagentPath(file.path) ? Promise.resolve(null) : provider.parse(file),
+    parserVersion: 2,
+    parse: (file) => isPrimaryTranscript(file.path) ? provider.parse(file) : Promise.resolve(null),
   };
 };
 
@@ -176,116 +168,6 @@ export const createCopilotProvider = (home: string): ConversationProvider =>
       if (type === "assistant.message") addMessage(session, "assistant", data.content ?? data.message, record.timestamp ?? data.timestamp);
     },
   });
-
-export const createDroidProvider = (home: string): ConversationProvider =>
-  jsonlProvider({
-    id: "droid",
-    home,
-    roots: [join(home, "sessions"), join(home, "projects")],
-    parseRecord: (record, session) => {
-      const type = String(record.type ?? "").replaceAll("_", "").toLowerCase();
-      if (type === "sessionstart" || (type === "system" && record.subtype === "init")) {
-        session.id = stringValue(record.id) ?? stringValue(record.session_id) ?? stringValue(record.sessionId) ?? session.id;
-        session.cwd = stringValue(record.cwd) ?? stringValue(record.working_directory) ?? session.cwd;
-        session.title = stringValue(record.title) ?? session.title;
-      } else if (type === "message") {
-        parseNestedMessage(record, session);
-      } else if (type === "completion") {
-        addMessage(session, "assistant", record.finalText ?? record.final ?? record.text, record.timestamp);
-      }
-    },
-  });
-
-const openClawSubagentTranscripts = async (
-  home: string,
-  roots: string[],
-): Promise<{ paths: Set<string>; sessionIds: Set<string> }> => {
-  const paths = new Set<string>();
-  const sessionIds = new Set<string>();
-  const stores = await discoverFiles(roots, (path) => basename(path) === "sessions.json");
-  for (const store of stores) {
-    let value: unknown;
-    try { value = JSON.parse(await readFile(store.path, "utf8")); } catch { continue; }
-    const visit = (candidate: unknown, keyHint = ""): void => {
-      if (Array.isArray(candidate)) {
-        for (const item of candidate) visit(item, keyHint);
-        return;
-      }
-      if (!isRecord(candidate)) return;
-      const spawnDepth = typeof candidate.spawnDepth === "number" ? candidate.spawnDepth : 0;
-      const isSubagent =
-        keyHint.includes(":subagent:") ||
-        stringValue(candidate.spawnedBy) !== null ||
-        spawnDepth > 0;
-      if (isSubagent) {
-        const sessionId = stringValue(candidate.sessionId);
-        if (sessionId !== null) {
-          sessionIds.add(sessionId);
-          paths.add(join(dirname(store.path), `${sessionId}.jsonl`));
-        }
-        const sessionFile = stringValue(candidate.sessionFile);
-        if (sessionFile !== null) {
-          paths.add(isAbsolute(sessionFile) ? sessionFile : resolve(dirname(store.path), sessionFile));
-        }
-      }
-      for (const [key, child] of Object.entries(candidate)) visit(child, key);
-    };
-    visit(value);
-  }
-  try {
-    const runs: unknown = JSON.parse(await readFile(join(home, "subagents", "runs.json"), "utf8"));
-    const visitRuns = (candidate: unknown): void => {
-      if (Array.isArray(candidate)) {
-        for (const item of candidate) visitRuns(item);
-        return;
-      }
-      if (!isRecord(candidate)) return;
-      const childSessionId = stringValue(candidate.childSessionId);
-      if (childSessionId !== null) sessionIds.add(childSessionId);
-      const childSessionKey = stringValue(candidate.childSessionKey);
-      if (childSessionKey !== null && childSessionKey.includes(":subagent:")) {
-        const suffix = childSessionKey.slice(childSessionKey.lastIndexOf(":subagent:") + ":subagent:".length);
-        if (suffix !== "") sessionIds.add(suffix);
-      }
-      for (const child of Object.values(candidate)) visitRuns(child);
-    };
-    visitRuns(runs);
-  } catch { /* The run registry is optional and may be updated concurrently. */ }
-  return { paths, sessionIds };
-};
-
-export const createOpenClawProvider = (home: string): ConversationProvider => {
-  const roots = [
-    join(home, "agents"),
-    ...(basename(home) === ".openclaw" ? [join(dirname(home), ".clawdbot", "agents")] : []),
-  ];
-  const provider = jsonlProvider({
-    id: "openclaw",
-    home,
-    roots,
-    include: (path) => !path.endsWith(".trajectory.jsonl") && !path.endsWith(".jsonl.lock"),
-    parseRecord: (record, session) => {
-      if (record.type === "session") {
-        session.id = stringValue(record.id) ?? session.id;
-        session.cwd = stringValue(record.cwd) ?? session.cwd;
-      } else if (record.type === "message") parseNestedMessage(record, session);
-    },
-  });
-  let subagentPaths = new Set<string>();
-  let subagentSessionIds = new Set<string>();
-  const isSubagentFile = (file: SessionFile): boolean =>
-    subagentPaths.has(file.path) || subagentSessionIds.has(basename(file.path, ".jsonl"));
-  return {
-    ...provider,
-    discover: async () => {
-      const subagents = await openClawSubagentTranscripts(home, roots);
-      subagentPaths = subagents.paths;
-      subagentSessionIds = subagents.sessionIds;
-      return (await provider.discover()).filter((file) => !isSubagentFile(file));
-    },
-    parse: (file) => isSubagentFile(file) ? Promise.resolve(null) : provider.parse(file),
-  };
-};
 
 const stripUserRequest = (value: string): string => {
   const match = value.match(/<USER_REQUEST>\s*([\s\S]*?)\s*<\/USER_REQUEST>/i);
@@ -506,58 +388,6 @@ export const createOpenCodeProvider = (home: string): ConversationProvider => {
       } finally {
         db.close();
       }
-    },
-  };
-};
-
-export const createHermesProvider = (home: string): ConversationProvider => {
-  const dbPath = join(home, "state.db");
-  const jsonRoot = join(home, "sessions");
-  return {
-    id: "hermes",
-    home,
-    sessionRoots: [home, jsonRoot],
-    discover: async () => {
-      const files: SessionFile[] = (await discoverFiles([jsonRoot], (path) => /^session_.*\.json$/i.test(basename(path)))).map((file) => ({ ...file, provider: "hermes" }));
-      const db = openReadOnly(dbPath);
-      if (db !== null) {
-        try {
-          const rows = db.prepare("SELECT id FROM sessions").all() as Array<{ id: string }>;
-          files.push(...(await Promise.all(rows.map((row) => virtualFile("hermes", dbPath, row.id)))));
-        } catch { /* Fall back to JSON sessions. */ } finally { db.close(); }
-      }
-      return files;
-    },
-    parse: async (file) => {
-      const virtual = decodeVirtualId(file.path);
-      if (virtual !== null) {
-        const db = openReadOnly(virtual.dbPath);
-        if (db === null) return null;
-        try {
-          const row = db.prepare("SELECT id, title, started_at, ended_at, model_config FROM sessions WHERE id = ?").get(virtual.id) as Record<string, unknown> | undefined;
-          if (row === undefined) return null;
-          const session = createMutable(file);
-          session.id = String(row.id);
-          session.title = typeof row.title === "string" ? row.title : null;
-          session.startedAt = timestampValue(row.started_at);
-          session.updatedAt = timestampValue(row.ended_at);
-          const rows = db.prepare("SELECT role, content, timestamp FROM messages WHERE session_id = ? ORDER BY timestamp, id").all(virtual.id) as Array<Record<string, unknown>>;
-          for (const message of rows) addMessage(session, message.role, message.content, message.timestamp);
-          return finishSession("hermes", file, session);
-        } finally { db.close(); }
-      }
-      let value: unknown;
-      try { value = JSON.parse(await readFile(file.path, "utf8")); } catch { return null; }
-      if (!isRecord(value)) return null;
-      const session = createMutable(file);
-      session.id = stringValue(value.session_id) ?? session.id;
-      session.cwd = stringValue(value.cwd);
-      session.startedAt = timestampValue(value.session_start);
-      session.updatedAt = timestampValue(value.last_updated);
-      if (Array.isArray(value.messages)) {
-        for (const message of value.messages) if (isRecord(message)) addMessage(session, message.role, message.content, message.timestamp);
-      }
-      return finishSession("hermes", file, session);
     },
   };
 };

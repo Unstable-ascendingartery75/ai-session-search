@@ -7,12 +7,8 @@ import {
   createAntigravityProvider,
   createCopilotProvider,
   createCursorProvider,
-  createDroidProvider,
-  createHermesProvider,
   createKimiProvider,
-  createOpenClawProvider,
   createOpenCodeProvider,
-  createPiProvider,
 } from "./additional.ts";
 import type { ConversationProvider } from "./types.ts";
 
@@ -28,12 +24,8 @@ export const PROVIDER_REGISTRY: Record<ProviderId, ProviderRegistration> = {
   codex: { id: "codex", defaultHome: () => join(homedir(), ".codex"), environmentVariables: ["AI_SESSION_CODEX_HOME", "CODEX_HOME"], create: createCodexProvider },
   antigravity: { id: "antigravity", defaultHome: () => join(homedir(), ".gemini"), environmentVariables: ["AI_SESSION_ANTIGRAVITY_HOME"], create: createAntigravityProvider },
   opencode: { id: "opencode", defaultHome: () => join(homedir(), ".local", "share", "opencode"), environmentVariables: ["AI_SESSION_OPENCODE_HOME", "OPENCODE_DATA_HOME"], create: createOpenCodeProvider },
-  hermes: { id: "hermes", defaultHome: () => join(homedir(), ".hermes"), environmentVariables: ["AI_SESSION_HERMES_HOME"], create: createHermesProvider },
   copilot: { id: "copilot", defaultHome: () => join(homedir(), ".copilot"), environmentVariables: ["AI_SESSION_COPILOT_HOME"], create: createCopilotProvider },
-  droid: { id: "droid", defaultHome: () => join(homedir(), ".factory"), environmentVariables: ["AI_SESSION_DROID_HOME", "FACTORY_HOME"], create: createDroidProvider },
-  openclaw: { id: "openclaw", defaultHome: () => join(homedir(), ".openclaw"), environmentVariables: ["AI_SESSION_OPENCLAW_HOME", "OPENCLAW_STATE_DIR"], create: createOpenClawProvider },
   cursor: { id: "cursor", defaultHome: () => join(homedir(), ".cursor"), environmentVariables: ["AI_SESSION_CURSOR_HOME"], create: createCursorProvider },
-  pi: { id: "pi", defaultHome: () => join(homedir(), ".pi"), environmentVariables: ["AI_SESSION_PI_HOME"], create: createPiProvider },
   kimi: { id: "kimi", defaultHome: () => join(homedir(), ".kimi-code"), environmentVariables: ["AI_SESSION_KIMI_HOME"], create: createKimiProvider },
 };
 

@@ -16,9 +16,9 @@ describe("resolveConfig", () => {
   });
 
   test("enables every registered provider in auto mode and accepts path overrides", () => {
-    const config = resolveConfig({ providerDir: ["pi=/tmp/custom-pi"] });
+    const config = resolveConfig({ providerDir: ["cursor=/tmp/custom-cursor"] });
     expect(config.providers.has("kimi")).toBe(true);
-    expect(config.providerHomes.pi).toBe(resolve("/tmp/custom-pi"));
+    expect(config.providerHomes.cursor).toBe(resolve("/tmp/custom-cursor"));
   });
 
   test("rejects unknown providers", () => {

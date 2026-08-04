@@ -143,6 +143,10 @@ export const createApp = (options: {
     }),
   );
 
+  app.get("/api/sync/status", (context) =>
+    context.json({ sync: indexer.syncProgress() }),
+  );
+
   app.get("/api/projects", (context) => context.json({ projects: database.listProjects() }));
 
   app.get("/api/sessions", (context) => {

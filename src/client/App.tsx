@@ -1,5 +1,5 @@
 import { useLingui } from "@lingui/react";
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type {
   CollectionSummary,
   NormalizedMessage,
@@ -32,6 +32,7 @@ import {
   parseStoredSidebarWidth,
   SIDEBAR_STORAGE_KEY,
 } from "./sidebarWidth.ts";
+import { splitTextByLiteralQuery } from "./textHighlight.ts";
 
 type Project = { provider: ProviderId; projectPath: string; count: number };
 type SessionDetail = { session: SessionSummary; messages: NormalizedMessage[] };
@@ -42,8 +43,15 @@ type AppStatus = {
   runtimePlatform: RuntimePlatform;
 };
 type ProviderSourceDraft = { enabled: boolean; home: string };
+type ActiveSearchMatch = {
+  sessionKey: string;
+  messageIndex: number;
+  role: SearchResult["role"];
+  query: string;
+};
 
 const GITHUB_URL = "https://github.com/lililib/ai-session-search";
+const INDEX_STATUS_POLL_MS = 1500;
 
 const DEFAULT_TERMINAL_SETTINGS = defaultTerminalSettings("darwin");
 
@@ -80,6 +88,15 @@ const providerColor = (provider: ProviderId): string => providerDescriptor(provi
 
 const isSearchResult = (item: SessionSummary | SearchResult): item is SearchResult =>
   "messageIndex" in item;
+
+const HighlightedText = ({ text, query }: { text: string; query: string }) =>
+  splitTextByLiteralQuery(text, query).map((part, index) =>
+    part.highlighted ? (
+      <mark className="search-highlight" key={index}>{part.value}</mark>
+    ) : (
+      <Fragment key={index}>{part.value}</Fragment>
+    ),
+  );
 
 const formatDate = (value: string, locale: string): string => {
   const date = new Date(value);
@@ -127,6 +144,7 @@ export const App = () => {
   const [status, setStatus] = useState<AppStatus | null>(null);
   const [selected, setSelected] = useState<SessionDetail | null>(null);
   const [selectedMessageIndex, setSelectedMessageIndex] = useState<number | null>(null);
+  const [activeSearchMatch, setActiveSearchMatch] = useState<ActiveSearchMatch | null>(null);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
   const [resumeCommandTemplates, setResumeCommandTemplates] =
@@ -251,6 +269,39 @@ export const App = () => {
   }, [status?.sync.running, refreshSidebar]);
 
   useEffect(() => {
+    if (status === null) return;
+    let active = true;
+    let requestInFlight = false;
+    const checkIndexStatus = async (): Promise<void> => {
+      if (!active || requestInFlight || document.visibilityState === "hidden") return;
+      requestInFlight = true;
+      try {
+        const data = await jsonRequest<{ sync: SyncProgress }>("/api/sync/status");
+        if (!active) return;
+        if (data.sync.revision !== status.sync.revision) {
+          await refreshSidebar();
+        } else {
+          setStatus((current) => current === null ? current : { ...current, sync: data.sync });
+        }
+      } catch (caught) {
+        if (active) setError(String(caught));
+      } finally {
+        requestInFlight = false;
+      }
+    };
+    const timer = window.setInterval(() => void checkIndexStatus(), INDEX_STATUS_POLL_MS);
+    const checkWhenVisible = (): void => {
+      if (document.visibilityState === "visible") void checkIndexStatus();
+    };
+    document.addEventListener("visibilitychange", checkWhenVisible);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", checkWhenVisible);
+    };
+  }, [status?.sync.revision, refreshSidebar]);
+
+  useEffect(() => {
     if (debouncedQuery === "") {
       setResults([]);
       return;
@@ -270,12 +321,24 @@ export const App = () => {
     }, 30);
   }, [selected, selectedMessageIndex]);
 
-  const openSession = async (sessionKey: string, messageIndex?: number): Promise<void> => {
+  const openSession = async (sessionKey: string, result?: SearchResult): Promise<void> => {
     setLoading(true);
     try {
       const detail = await jsonRequest<SessionDetail>(`/api/sessions/${encodeURIComponent(sessionKey)}`);
       setSelected(detail);
-      setSelectedMessageIndex(messageIndex ?? null);
+      setSelectedMessageIndex(
+        result !== undefined && result.messageIndex >= 0 ? result.messageIndex : null,
+      );
+      setActiveSearchMatch(
+        result === undefined || debouncedQuery === ""
+          ? null
+          : {
+              sessionKey,
+              messageIndex: result.messageIndex,
+              role: result.role,
+              query: debouncedQuery,
+            },
+      );
       setEditingTitle(false);
       setEditingResumeCommand(false);
     } catch (caught) {
@@ -715,7 +778,7 @@ export const App = () => {
               <button
                 className={`session-row ${selected?.session.sessionKey === item.sessionKey ? "selected" : ""}`}
                 key={result === null ? item.sessionKey : `${item.sessionKey}:${result.messageIndex}`}
-                onClick={() => void openSession(item.sessionKey, result?.messageIndex)}
+                onClick={() => void openSession(item.sessionKey, result ?? undefined)}
               >
                 <div className="session-row-title">
                   <span className="provider-dot" style={{ background: providerColor(item.provider) }} />
@@ -854,7 +917,17 @@ export const App = () => {
                     <button onClick={() => setEditingTitle(false)}>{t("common.cancel")}</button>
                   </div>
                 ) : (
-                  <h2>{selected.session.displayTitle}</h2>
+                  <h2 title={selected.session.displayTitle}>
+                    <HighlightedText
+                      text={selected.session.displayTitle}
+                      query={
+                        activeSearchMatch?.sessionKey === selected.session.sessionKey &&
+                        activeSearchMatch.role === "title"
+                          ? activeSearchMatch.query
+                          : ""
+                      }
+                    />
+                  </h2>
                 )}
                 {selected.session.customTitle !== null && !editingTitle && (
                   <p>{t("session.originalTitle", { title: selected.session.originalTitle })}</p>
@@ -889,6 +962,9 @@ export const App = () => {
                 )}
                 <button
                   title={
+                    selected.session.favorite ? t("favorite.remove") : t("favorite.add")
+                  }
+                  aria-label={
                     selected.session.favorite ? t("favorite.remove") : t("favorite.add")
                   }
                   className={selected.session.favorite ? "star-button active" : "star-button"}
@@ -1041,7 +1117,17 @@ export const App = () => {
                     )}
                     <time>{formatDate(message.timestamp, locale)}</time>
                   </div>
-                  <pre>{message.content}</pre>
+                  <pre>
+                    <HighlightedText
+                      text={message.content}
+                      query={
+                        activeSearchMatch?.sessionKey === selected.session.sessionKey &&
+                        activeSearchMatch.messageIndex === message.index
+                          ? activeSearchMatch.query
+                          : ""
+                      }
+                    />
+                  </pre>
                 </article>
               ))}
             </div>

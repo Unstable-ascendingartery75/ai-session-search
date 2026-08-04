@@ -6,12 +6,8 @@ const labels: Record<ProviderId, string> = {
   codex: "Codex",
   antigravity: "Antigravity",
   opencode: "OpenCode",
-  hermes: "Hermes",
   copilot: "GitHub Copilot CLI",
-  droid: "Droid",
-  openclaw: "OpenClaw",
   cursor: "Cursor",
-  pi: "Pi",
   kimi: "Kimi Code",
 };
 
@@ -20,12 +16,8 @@ const colors: Record<ProviderId, string> = {
   codex: "#176b55",
   antigravity: "#6d5bd0",
   opencode: "#2f6feb",
-  hermes: "#9254de",
   copilot: "#24292f",
-  droid: "#d97706",
-  openclaw: "#dc2626",
   cursor: "#111827",
-  pi: "#0891b2",
   kimi: "#2563eb",
 };
 

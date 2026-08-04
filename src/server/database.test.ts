@@ -48,6 +48,50 @@ const sampleSession = (): ParsedSession => ({
 });
 
 describe("SearchDatabase", () => {
+  test("removes indexes left by providers that are no longer supported", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "ai-session-search-removed-providers-"));
+    const path = join(directory, "search.db");
+    new SearchDatabase(path).close();
+
+    const legacy = new DatabaseSync(path);
+    const insertSession = legacy.prepare(`
+      INSERT INTO sessions (
+        session_key, source_session_id, provider, file_path, project_path,
+        original_title, started_at, updated_at, message_count,
+        file_mtime_ms, file_size, parser_version, indexed_at
+      ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, 1, 1, 1, 1, 1)
+    `);
+    for (const provider of ["pi", "openclaw", "hermes", "droid"]) {
+      const sessionKey = `${provider}:legacy`;
+      insertSession.run(
+        sessionKey,
+        "legacy",
+        provider,
+        `/tmp/${provider}.jsonl`,
+        `${provider} legacy`,
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-01T00:00:00.000Z",
+      );
+      legacy.prepare(`
+        INSERT INTO messages_fts (
+          session_key, provider, project_path, role, timestamp, message_index, content
+        ) VALUES (?, ?, '', 'assistant', '', 0, 'removed provider content')
+      `).run(sessionKey, provider);
+    }
+    legacy.close();
+
+    const database = new SearchDatabase(path);
+    expect(database.search({ query: "removed provider content" })).toEqual([]);
+    expect(Object.values(database.countSessions()).reduce((sum, count) => sum + count, 0)).toBe(0);
+    database.close();
+
+    const verification = new DatabaseSync(path, { readOnly: true });
+    expect(verification.prepare("SELECT COUNT(*) AS count FROM sessions").get()).toMatchObject({ count: 0 });
+    expect(verification.prepare("SELECT COUNT(*) AS count FROM messages_fts").get()).toMatchObject({ count: 0 });
+    verification.close();
+    await rm(directory, { recursive: true, force: true });
+  });
+
   test("migrates an existing metadata table without losing rows", async () => {
     const directory = await mkdtemp(join(tmpdir(), "ai-session-search-migration-"));
     const path = join(directory, "search.db");
@@ -345,8 +389,8 @@ describe("SearchDatabase", () => {
       database.close();
       await rm(directory, { recursive: true, force: true });
     });
-    const session = { ...sampleSession(), sessionKey: "pi:session-1", provider: "pi" as const };
-    database.upsertSession(session, { provider: "pi", path: session.filePath, mtimeMs: 1, size: 100 });
-    expect(database.search({ query: "支付回调", provider: "pi" })[0]?.provider).toBe("pi");
+    const session = { ...sampleSession(), sessionKey: "cursor:session-1", provider: "cursor" as const };
+    database.upsertSession(session, { provider: "cursor", path: session.filePath, mtimeMs: 1, size: 100 });
+    expect(database.search({ query: "支付回调", provider: "cursor" })[0]?.provider).toBe("cursor");
   });
 });

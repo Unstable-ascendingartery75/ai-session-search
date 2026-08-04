@@ -28,6 +28,7 @@ export class SessionIndexer {
     this.#providers = providers;
     this.#syncProgress = {
       running: false,
+      revision: 0,
       currentProvider: null,
       completedProviders: 0,
       totalProviders: providers.length,
@@ -70,6 +71,7 @@ export class SessionIndexer {
     const results: SyncResult[] = [];
     this.#syncProgress = {
       running: true,
+      revision: this.#syncProgress.revision,
       currentProvider: this.#providers[0]?.id ?? null,
       completedProviders: 0,
       totalProviders: this.#providers.length,
@@ -116,6 +118,7 @@ export class SessionIndexer {
     if (!detected) {
       onProgress?.(0, 0);
       const removed = this.#database.removeMissingFiles(provider.id, new Set());
+      if (removed > 0) this.#incrementRevision();
       return { provider: providerId, discovered: 0, indexed: 0, unchanged: 0, removed, errors: 0 };
     }
 
@@ -191,6 +194,13 @@ export class SessionIndexer {
     for (const failure of batchResult.errors) {
       process.stderr.write(`[${provider.id}] Failed to index ${failure.path}: ${failure.error}\n`);
     }
+    if (
+      batchResult.indexed > 0 ||
+      batchResult.removed > 0 ||
+      removeSessionKeys.size > 0
+    ) {
+      this.#incrementRevision();
+    }
     return {
       provider: providerId,
       discovered: files.length,
@@ -198,6 +208,13 @@ export class SessionIndexer {
       unchanged,
       removed: batchResult.removed,
       errors: errors + batchResult.errors.length,
+    };
+  }
+
+  #incrementRevision(): void {
+    this.#syncProgress = {
+      ...this.#syncProgress,
+      revision: this.#syncProgress.revision + 1,
     };
   }
 

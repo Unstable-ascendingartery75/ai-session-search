@@ -60,6 +60,7 @@ const createFixture = async (hostname = "127.0.0.1") => {
     }]),
     syncProgress: vi.fn(() => ({
       running: false,
+      revision: 7,
       currentProvider: null,
       completedProviders: 0,
       totalProviders: 1,
@@ -77,6 +78,18 @@ const createFixture = async (hostname = "127.0.0.1") => {
   });
   return { app, database, terminalLauncher, indexer };
 };
+
+describe("index sync status API", () => {
+  test("exposes the lightweight index revision used by automatic sidebar refresh", async () => {
+    const { app } = await createFixture();
+    const response = await app.request("http://127.0.0.1:3411/api/sync/status");
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      sync: { running: false, revision: 7 },
+    });
+  });
+});
 
 describe("provider source settings API", () => {
   test("persists an absolute provider home and reconfigures the live indexer", async () => {

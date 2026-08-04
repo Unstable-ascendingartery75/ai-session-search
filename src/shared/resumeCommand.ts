@@ -6,10 +6,8 @@ export const DEFAULT_RESUME_COMMAND_TEMPLATES: ResumeCommandTemplates = {
   codex: "cd {cwd} && codex resume {sessionId}",
   antigravity: "cd {cwd} && agy --conversation {sessionId}",
   opencode: "cd {cwd} && opencode --session {sessionId}",
-  hermes: "cd {cwd} && hermes --resume {sessionId}",
   copilot: "cd {cwd} && copilot --resume={sessionId}",
   cursor: "cd {cwd} && agent --resume {sessionId}",
-  pi: "cd {cwd} && pi --resume {sessionId}",
   kimi: "cd {cwd} && kimi --session {sessionId}",
 };
 

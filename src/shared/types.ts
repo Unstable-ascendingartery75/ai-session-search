@@ -3,12 +3,8 @@ export const PROVIDER_IDS = [
   "codex",
   "antigravity",
   "opencode",
-  "hermes",
   "copilot",
-  "droid",
-  "openclaw",
   "cursor",
-  "pi",
   "kimi",
 ] as const;
 
@@ -111,6 +107,7 @@ export type ProviderSourceSetting = ProviderStatus & {
 
 export type SyncProgress = {
   running: boolean;
+  revision: number;
   currentProvider: ProviderId | null;
   completedProviders: number;
   totalProviders: number;

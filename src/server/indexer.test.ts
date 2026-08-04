@@ -283,14 +283,14 @@ describe("session indexer", () => {
     await writeFile(path, "session");
     const info = await stat(path);
     const provider: ConversationProvider = {
-      id: "pi",
+      id: "cursor",
       home,
       sessionRoots: [home],
-      discover: async () => [{ provider: "pi", path, mtimeMs: info.mtimeMs, size: info.size }],
+      discover: async () => [{ provider: "cursor", path, mtimeMs: info.mtimeMs, size: info.size }],
       parse: async () => ({
-        sessionKey: "pi:session",
+        sessionKey: "cursor:session",
         sourceSessionId: "session",
-        provider: "pi",
+        provider: "cursor",
         filePath: path,
         projectPath: null,
         originalTitle: "Session",
@@ -304,9 +304,14 @@ describe("session indexer", () => {
     const manifestLookup = vi.spyOn(database, "getIndexedFiles");
     const indexer = new SessionIndexer(database, [provider]);
     try {
-      await indexer.syncProvider("pi");
+      expect(indexer.syncProgress().revision).toBe(0);
+      await indexer.syncProvider("cursor");
       expect(manifestLookup).toHaveBeenCalledOnce();
       expect(perFileLookup).not.toHaveBeenCalled();
+      expect(indexer.syncProgress().revision).toBe(1);
+
+      await indexer.syncProvider("cursor");
+      expect(indexer.syncProgress().revision).toBe(1);
     } finally {
       indexer.close();
       database.close();

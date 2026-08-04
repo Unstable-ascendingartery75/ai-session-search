@@ -9,12 +9,8 @@ import {
   createAntigravityProvider,
   createCopilotProvider,
   createCursorProvider,
-  createDroidProvider,
-  createHermesProvider,
   createKimiProvider,
-  createOpenClawProvider,
   createOpenCodeProvider,
-  createPiProvider,
 } from "./additional.ts";
 
 const tempDirectories: string[] = [];
@@ -126,10 +122,11 @@ describe("conversation providers", () => {
     })).resolves.toBeNull();
   });
 
-  test("Cursor provider excludes nested subagent transcripts that would reuse the parent id", async () => {
+  test("Cursor provider only accepts the primary transcript for each session", async () => {
     const home = await makeTempDirectory();
     const transcriptRoot = join(home, "projects", "work", "agent-transcripts", "parent-1");
     const mainPath = join(transcriptRoot, "parent-1.jsonl");
+    const auxiliaryPath = join(transcriptRoot, "notes.jsonl");
     const childPath = join(transcriptRoot, "subagents", "child-1.jsonl");
     await mkdir(join(childPath, ".."), { recursive: true });
     await writeFile(mainPath, [
@@ -139,6 +136,9 @@ describe("conversation providers", () => {
     await writeFile(childPath, [
       { role: "user", message: { content: "Cursor child task" } },
       { role: "assistant", message: { content: "Cursor child detail" } },
+    ].map((record) => JSON.stringify(record)).join("\n"));
+    await writeFile(auxiliaryPath, [
+      { role: "assistant", message: { content: "Cursor auxiliary detail" } },
     ].map((record) => JSON.stringify(record)).join("\n"));
 
     const provider = createCursorProvider(home);
@@ -151,6 +151,13 @@ describe("conversation providers", () => {
       path: childPath,
       mtimeMs: childStat.mtimeMs,
       size: childStat.size,
+    })).resolves.toBeNull();
+    const auxiliaryStat = await stat(auxiliaryPath);
+    await expect(provider.parse({
+      provider: "cursor",
+      path: auxiliaryPath,
+      mtimeMs: auxiliaryStat.mtimeMs,
+      size: auxiliaryStat.size,
     })).resolves.toBeNull();
   });
 
@@ -174,17 +181,8 @@ describe("conversation providers", () => {
     ]);
   });
 
-  test("normalizes Pi, Cursor, Droid, Copilot, and OpenClaw JSONL sessions", async () => {
+  test("normalizes Cursor and Copilot JSONL sessions", async () => {
     const cases = [
-      {
-        factory: createPiProvider,
-        relativePath: "agent/sessions/pi.jsonl",
-        records: [
-          { type: "session", id: "pi-1", cwd: "/work/pi" },
-          { type: "message", timestamp: "2026-01-01T00:00:00Z", message: { role: "user", content: [{ type: "text", text: "Pi 用户问题" }] } },
-          { type: "message", timestamp: "2026-01-01T00:00:01Z", message: { role: "assistant", content: [{ type: "text", text: "Pi 回答" }] } },
-        ],
-      },
       {
         factory: createCursorProvider,
         relativePath: "projects/work/agent-transcripts/cursor-1/cursor-1.jsonl",
@@ -194,30 +192,12 @@ describe("conversation providers", () => {
         ],
       },
       {
-        factory: createDroidProvider,
-        relativePath: "sessions/droid.jsonl",
-        records: [
-          { type: "session_start", id: "droid-1", cwd: "/work/droid" },
-          { type: "message", message: { role: "user", content: [{ type: "text", text: "Droid 用户问题" }] } },
-          { type: "completion", finalText: "Droid 回答" },
-        ],
-      },
-      {
         factory: createCopilotProvider,
         relativePath: "session-state/copilot-1/events.jsonl",
         records: [
           { type: "session.start", data: { sessionId: "copilot-1" } },
           { type: "user.message", data: { content: "Copilot 用户问题" } },
           { type: "assistant.message", data: { content: "Copilot 回答" } },
-        ],
-      },
-      {
-        factory: createOpenClawProvider,
-        relativePath: "agents/main/sessions/openclaw.jsonl",
-        records: [
-          { type: "session", id: "openclaw-1", cwd: "/work/openclaw" },
-          { type: "message", message: { role: "user", content: [{ type: "text", text: "OpenClaw 用户问题" }] } },
-          { type: "message", message: { role: "assistant", content: [{ type: "text", text: "OpenClaw 回答" }] } },
         ],
       },
     ];
@@ -252,7 +232,7 @@ describe("conversation providers", () => {
     expect(parsed?.messages.map((message) => message.content)).toEqual(["Kimi 用户问题", "Kimi 完整回答"]);
   });
 
-  test("indexes Antigravity transcript and Hermes JSON history", async () => {
+  test("indexes an Antigravity transcript", async () => {
     const antigravityHome = await makeTempDirectory();
     const transcript = join(antigravityHome, "conversation-1", ".system_generated", "logs", "transcript.jsonl");
     await mkdir(join(transcript, ".."), { recursive: true });
@@ -264,16 +244,6 @@ describe("conversation providers", () => {
     const antigravityParsed = await antigravity.parse((await antigravity.discover())[0]!);
     expect(antigravityParsed?.messages.map((message) => message.content)).toEqual(["查找配置", "已经找到配置"]);
 
-    const hermesHome = await makeTempDirectory();
-    await mkdir(join(hermesHome, "sessions"), { recursive: true });
-    await writeFile(join(hermesHome, "sessions", "session_h1.json"), JSON.stringify({
-      session_id: "h1",
-      cwd: "/work/hermes",
-      messages: [{ role: "user", content: "Hermes 问题" }, { role: "assistant", content: "Hermes 回答" }],
-    }));
-    const hermes = createHermesProvider(hermesHome);
-    const hermesParsed = await hermes.parse((await hermes.discover())[0]!);
-    expect(hermesParsed?.messages).toHaveLength(2);
   });
 
   test("reads current OpenCode SQLite sessions without writing to the source database", async () => {
@@ -301,58 +271,6 @@ describe("conversation providers", () => {
     const parsed = await provider.parse(files[0]!);
     expect(parsed?.originalTitle).toBe("OpenCode 测试");
     expect(parsed?.messages.map((message) => message.content)).toEqual(["OpenCode 用户问题", "OpenCode 回答"]);
-  });
-
-  test("OpenClaw provider excludes transcripts marked as spawned sessions", async () => {
-    const home = await makeTempDirectory();
-    const sessions = join(home, "agents", "main", "sessions");
-    const mainPath = join(sessions, "main-id.jsonl");
-    const childPath = join(sessions, "child-id.jsonl");
-    const orphanChildPath = join(sessions, "orphan-child-id.jsonl");
-    await mkdir(sessions, { recursive: true });
-    await mkdir(join(home, "subagents"), { recursive: true });
-    await writeFile(join(sessions, "sessions.json"), JSON.stringify({
-      "agent:main:main": { sessionId: "main-id", updatedAt: 1 },
-      "agent:main:subagent:child": {
-        sessionId: "child-id",
-        updatedAt: 2,
-        spawnedBy: "agent:main:main",
-        spawnDepth: 1,
-      },
-    }));
-    await writeFile(join(home, "subagents", "runs.json"), JSON.stringify({
-      runs: {
-        "run-1": {
-          childSessionKey: "agent:main:subagent:orphan-child-id",
-          requesterSessionKey: "agent:main:main",
-        },
-      },
-    }));
-    await writeFile(mainPath, [
-      { type: "session", id: "main-id", cwd: "/work/openclaw" },
-      { type: "message", message: { role: "user", content: "OpenClaw main question" } },
-      { type: "message", message: { role: "assistant", content: "OpenClaw main answer" } },
-    ].map((record) => JSON.stringify(record)).join("\n"));
-    await writeFile(childPath, [
-      { type: "session", id: "child-id", cwd: "/work/openclaw" },
-      { type: "message", message: { role: "user", content: "OpenClaw child task" } },
-      { type: "message", message: { role: "assistant", content: "OpenClaw child detail" } },
-    ].map((record) => JSON.stringify(record)).join("\n"));
-    await writeFile(orphanChildPath, [
-      { type: "session", id: "orphan-child-id", cwd: "/work/openclaw" },
-      { type: "message", message: { role: "assistant", content: "OpenClaw orphan child detail" } },
-    ].map((record) => JSON.stringify(record)).join("\n"));
-
-    const provider = createOpenClawProvider(home);
-    const files = await provider.discover();
-    expect(files.map((file) => file.path)).toEqual([mainPath]);
-    const childStat = await stat(childPath);
-    await expect(provider.parse({
-      provider: "openclaw",
-      path: childPath,
-      mtimeMs: childStat.mtimeMs,
-      size: childStat.size,
-    })).resolves.toBeNull();
   });
 
   test("Codex provider reads active and archived sessions without duplicate event records", async () => {

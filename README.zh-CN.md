@@ -5,7 +5,7 @@
 [![GitHub Release](https://img.shields.io/github/v/release/lililib/ai-session-search)](https://github.com/lililib/ai-session-search/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
-本地优先、只读的 AI 编程会话搜索器。自动发现 11 种编程工具的本地会话，并使用
+本地优先、只读的 AI 编程会话搜索器。自动发现 7 种编程工具的本地会话，并使用
 SQLite FTS5 trigram 索引搜索自然语言、代码、路径、错误信息和 Session ID。
 
 ![AI Session Search 界面](./docs/images/ai-session-search.png)
@@ -50,12 +50,8 @@ Windows 包要求 64 位 Windows 10 或 Windows 11，不支持 Windows 7/8/8.1�
 | `codex` | Codex | `~/.codex` |
 | `antigravity` | Antigravity | `~/.gemini` |
 | `opencode` | OpenCode | `~/.local/share/opencode` |
-| `hermes` | Hermes | `~/.hermes` |
 | `copilot` | GitHub Copilot CLI | `~/.copilot` |
-| `droid` | Droid / Factory | `~/.factory` |
-| `openclaw` | OpenClaw | `~/.openclaw` |
 | `cursor` | Cursor | `~/.cursor` |
-| `pi` | Pi | `~/.pi` |
 | `kimi` | Kimi Code | `~/.kimi-code` |
 
 Web 和桌面端都可以打开“会话来源”，修改客户端目录、恢复自动路径或启用/禁用客户端。
@@ -91,7 +87,7 @@ corepack pnpm start
 
 ```bash
 corepack pnpm start --providers codex --codex-dir /path/to/codex-home
-corepack pnpm start --provider-dir kimi=/custom/kimi --provider-dir pi=/custom/pi
+corepack pnpm start --provider-dir kimi=/custom/kimi --provider-dir cursor=/custom/cursor
 ```
 
 ## 恢复命令

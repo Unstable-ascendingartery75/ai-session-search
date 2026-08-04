@@ -6,7 +6,7 @@ English | [简体中文](./README.zh-CN.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
 A local-first, read-only search app for AI coding sessions. It discovers local conversations from
-11 coding tools and uses SQLite FTS5 trigram indexing to search natural language, code, paths,
+7 coding tools and uses SQLite FTS5 trigram indexing to search natural language, code, paths,
 errors, and Session IDs.
 
 ![AI Session Search interface](./docs/images/ai-session-search.png)
@@ -54,12 +54,8 @@ are written only to its own SQLite database.
 | `codex` | Codex | `~/.codex` |
 | `antigravity` | Antigravity | `~/.gemini` |
 | `opencode` | OpenCode | `~/.local/share/opencode` |
-| `hermes` | Hermes | `~/.hermes` |
 | `copilot` | GitHub Copilot CLI | `~/.copilot` |
-| `droid` | Droid / Factory | `~/.factory` |
-| `openclaw` | OpenClaw | `~/.openclaw` |
 | `cursor` | Cursor | `~/.cursor` |
-| `pi` | Pi | `~/.pi` |
 | `kimi` | Kimi Code | `~/.kimi-code` |
 
 Open **Session sources** in either the web or desktop app to change a client directory, restore its
@@ -96,7 +92,7 @@ Examples:
 
 ```bash
 corepack pnpm start --providers codex --codex-dir /path/to/codex-home
-corepack pnpm start --provider-dir kimi=/custom/kimi --provider-dir pi=/custom/pi
+corepack pnpm start --provider-dir kimi=/custom/kimi --provider-dir cursor=/custom/cursor
 ```
 
 ## Resume commands

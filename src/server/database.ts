@@ -143,6 +143,7 @@ export class SearchDatabase {
       "CREATE INDEX IF NOT EXISTS idx_session_metadata_collection ON session_metadata(collection_id)",
     );
     this.#db.exec(FTS_DDL);
+    this.#removeUnsupportedProviderIndexes();
   }
 
   #migrateProviderConstraint(): void {
@@ -181,6 +182,23 @@ export class SearchDatabase {
       CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON sessions(updated_at);
       COMMIT;
     `);
+  }
+
+  #removeUnsupportedProviderIndexes(): void {
+    const placeholders = PROVIDER_IDS.map(() => "?").join(", ");
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      this.#db
+        .prepare(`DELETE FROM messages_fts WHERE provider NOT IN (${placeholders})`)
+        .run(...PROVIDER_IDS);
+      this.#db
+        .prepare(`DELETE FROM sessions WHERE provider NOT IN (${placeholders})`)
+        .run(...PROVIDER_IDS);
+      this.#db.exec("COMMIT");
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   close(): void {
