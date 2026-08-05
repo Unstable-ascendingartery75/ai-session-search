@@ -26,6 +26,8 @@ export const messages: Record<MessageId, string> = {
   "search.clear": "清空搜索",
   "filter.allProviders": "全部来源",
   "filter.allProjects": "全部项目",
+  "filter.searchProjects": "搜索项目",
+  "filter.noProjects": "没有匹配的项目",
   "filter.favoritesOnly": "仅收藏",
   "filter.renamedOnly": "已重命名",
   "filter.allCollections": "全部收藏夹",

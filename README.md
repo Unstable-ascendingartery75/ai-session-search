@@ -129,9 +129,6 @@ corepack pnpm typecheck
 corepack pnpm build
 ```
 
-Pushing a `v*` tag builds macOS arm64, macOS x64, and Windows x64 in GitHub Actions and attaches the
-artifacts to a GitHub Release.
-
 ## Privacy and license
 
 - Does not read `auth.json`, API keys, or login credentials.

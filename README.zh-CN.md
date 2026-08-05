@@ -122,9 +122,6 @@ corepack pnpm typecheck
 corepack pnpm build
 ```
 
-推送 `v*` 标签后，GitHub Actions 会自动构建 macOS arm64、macOS x64、Windows x64，
-并把产物加入 GitHub Release。
-
 ## 隐私与许可证
 
 - 不读取 `auth.json`、API Key 或登录凭证。

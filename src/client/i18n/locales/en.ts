@@ -24,6 +24,8 @@ export const messages = {
   "search.clear": "Clear search",
   "filter.allProviders": "All providers",
   "filter.allProjects": "All projects",
+  "filter.searchProjects": "Search projects",
+  "filter.noProjects": "No matching projects",
   "filter.favoritesOnly": "Favorites only",
   "filter.renamedOnly": "Renamed",
   "filter.allCollections": "All collections",

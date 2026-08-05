@@ -28,6 +28,7 @@ import {
 } from "./components/ProviderSourcesDialog.tsx";
 import { SearchBox } from "./components/SearchBox.tsx";
 import { UpdateNotification } from "./components/UpdateNotification.tsx";
+import { ProjectFilter } from "./components/ProjectFilter.tsx";
 import {
   commandDialectForTerminal,
   defaultTerminalSettings,
@@ -657,18 +658,12 @@ export const App = () => {
               <option key={item.id} value={item.id}>{item.label}</option>
             ))}
           </select>
-          <select
-            className="project-filter"
+          <ProjectFilter
+            projects={visibleProjects}
             value={projectPath}
-            onChange={(event) => setProjectPath(event.target.value)}
-          >
-            <option value="">{t("filter.allProjects")}</option>
-            {visibleProjects.map((project) => (
-              <option key={`${project.provider}:${project.projectPath}`} value={project.projectPath}>
-                {project.projectPath} ({project.count})
-              </option>
-            ))}
-          </select>
+            t={t}
+            onChange={setProjectPath}
+          />
           <button
             className={favoritesOnly ? "filter-button active" : "filter-button"}
             onClick={() => setFavoritesOnly((value) => !value)}
