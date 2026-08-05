@@ -32,6 +32,28 @@ export type TerminalSettings = {
 
 export type RuntimePlatform = "darwin" | "win32" | "linux" | "other";
 
+export type UpdateStatus =
+  | "disabled"
+  | "checking"
+  | "up-to-date"
+  | "available"
+  | "downloading"
+  | "downloaded"
+  | "error";
+
+export type UpdateState = {
+  enabled: boolean;
+  status: UpdateStatus;
+  currentVersion: string;
+  latestVersion: string | null;
+  releaseUrl: string | null;
+  downloadAvailable: boolean;
+  ignored: boolean;
+  downloadedBytes: number;
+  totalBytes: number | null;
+  error: string | null;
+};
+
 export type ProviderDescriptor = {
   id: ProviderId;
   label: string;

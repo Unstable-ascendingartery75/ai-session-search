@@ -12,6 +12,7 @@ import { SearchDatabase } from "./database.ts";
 import type { SessionIndexService } from "./indexer.ts";
 import { createEnabledProviders } from "./providers/registry.ts";
 import type { TerminalLauncher } from "./terminalLauncher.ts";
+import type { UpdateService } from "./updateService.ts";
 
 const providerValue = (value: string | undefined): ProviderId | undefined =>
   value !== undefined && isProviderId(value) ? value : undefined;
@@ -79,6 +80,7 @@ export const createApp = (options: {
   terminalLauncher: Pick<TerminalLauncher, "launch">;
   clientDirectory?: string;
   runtimePlatform?: NodeJS.Platform;
+  updateService?: UpdateService;
 }): Hono => {
   const { database, indexer, config, terminalLauncher } = options;
   const runtimePlatform = options.runtimePlatform ?? process.platform;
@@ -146,6 +148,44 @@ export const createApp = (options: {
   app.get("/api/sync/status", (context) =>
     context.json({ sync: indexer.syncProgress() }),
   );
+
+  app.get("/api/update", async (context) => {
+    if (options.updateService === undefined) {
+      return context.json({
+        enabled: false,
+        status: "disabled",
+        currentVersion: "",
+        latestVersion: null,
+        releaseUrl: null,
+        downloadAvailable: false,
+        ignored: false,
+        downloadedBytes: 0,
+        totalBytes: null,
+        error: null,
+      });
+    }
+    return context.json(await options.updateService.getState(context.req.query("refresh") === "1"));
+  });
+
+  app.post("/api/update/download", async (context) => {
+    if (!isLoopbackHostname(config.hostname) || !isTrustedLaunchRequest(context)) {
+      return context.json({ error: "Update downloads are only available to same-origin loopback requests" }, 403);
+    }
+    if (options.updateService === undefined) {
+      return context.json({ error: "Update downloads are only available in the desktop app" }, 404);
+    }
+    return context.json(await options.updateService.startDownload(), 202);
+  });
+
+  app.post("/api/update/ignore", async (context) => {
+    if (!isLoopbackHostname(config.hostname) || !isTrustedLaunchRequest(context)) {
+      return context.json({ error: "Update settings are only available to same-origin loopback requests" }, 403);
+    }
+    if (options.updateService === undefined) {
+      return context.json({ error: "Update settings are only available in the desktop app" }, 404);
+    }
+    return context.json(await options.updateService.ignoreVersion());
+  });
 
   app.get("/api/projects", (context) => context.json({ projects: database.listProjects() }));
 

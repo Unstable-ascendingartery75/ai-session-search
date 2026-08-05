@@ -9,6 +9,7 @@ import { SessionIndexer, type SessionIndexService, type SyncResult } from "./ind
 import { createEnabledProviders } from "./providers/registry.ts";
 import type { ConversationProvider } from "./providers/types.ts";
 import { TerminalLauncher } from "./terminalLauncher.ts";
+import type { UpdateService } from "./updateService.ts";
 
 export type ServerRuntime = {
   url: string;
@@ -28,10 +29,12 @@ export const startServer = async (
     clientDirectory?: string;
     providers?: ConversationProvider[];
     createIndexer?: (database: SearchDatabase, providers: ConversationProvider[]) => SessionIndexService;
+    createUpdateService?: (database: SearchDatabase) => UpdateService;
   } = {},
 ): Promise<ServerRuntime> => {
   await mkdir(config.dataDir, { recursive: true });
   const database = new SearchDatabase(join(config.dataDir, "search.db"));
+  const updateService = options.createUpdateService?.(database);
   const sourceSettings = database.getProviderSourceSettings(config.providerHomes, config.providers);
   const configuredHomes = Object.fromEntries(
     sourceSettings.map((setting) => [setting.provider, setting.home]),
@@ -58,6 +61,7 @@ export const startServer = async (
             ...(options.clientDirectory === undefined
               ? {}
               : { clientDirectory: options.clientDirectory }),
+            ...(updateService === undefined ? {} : { updateService }),
           }).fetch,
           port: config.port,
           hostname: config.hostname,

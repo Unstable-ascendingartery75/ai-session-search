@@ -91,6 +91,30 @@ describe("index sync status API", () => {
   });
 });
 
+describe("desktop update API", () => {
+  test("reports that updates are disabled outside the desktop runtime", async () => {
+    const { app } = await createFixture();
+    const response = await app.request("http://127.0.0.1:3411/api/update?refresh=1");
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ enabled: false, status: "disabled" });
+  });
+
+  test("rejects update downloads outside the desktop runtime", async () => {
+    const { app } = await createFixture();
+    const response = await app.request("http://127.0.0.1:3411/api/update/download", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: "http://127.0.0.1:3411",
+      },
+      body: "{}",
+    });
+
+    expect(response.status).toBe(404);
+  });
+});
+
 describe("provider source settings API", () => {
   test("persists an absolute provider home and reconfigures the live indexer", async () => {
     const { app, indexer } = await createFixture();

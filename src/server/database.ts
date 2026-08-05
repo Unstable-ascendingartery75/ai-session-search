@@ -47,6 +47,19 @@ export class SearchDatabase {
     this.#db.close();
   }
 
+  getAppSetting(key: string): string | null {
+    const row = this.#db.prepare("SELECT value FROM app_settings WHERE key = ?").get(key) as SqlRow | undefined;
+    return row === undefined ? null : stringColumn(row, "value");
+  }
+
+  setAppSetting(key: string, value: string): void {
+    this.#db.prepare(`
+      INSERT INTO app_settings(key, value, updated_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
+    `).run(key, value, Date.now());
+  }
+
   getIndexedFile(path: string): {
     sessionKey: string;
     mtimeMs: number;

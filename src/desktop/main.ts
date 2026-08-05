@@ -5,6 +5,7 @@ import { resolveConfig } from "../server/config.ts";
 import { startServer, type ServerRuntime } from "../server/runtime.ts";
 import { desktopDataDirectoryOption, migrateLegacyDesktopDatabase } from "./dataDirectory.ts";
 import { WorkerSessionIndexer } from "./workerIndexer.ts";
+import { DesktopUpdateManager } from "./updateManager.ts";
 
 let mainWindow: BrowserWindow | null = null;
 let runtime: ServerRuntime | null = null;
@@ -24,6 +25,14 @@ const createWindow = async (): Promise<void> => {
     }
     runtime = await startServer(config, {
       clientDirectory: join(app.getAppPath(), "dist", "client"),
+      createUpdateService: (database) => new DesktopUpdateManager({
+        currentVersion: app.getVersion(),
+        platform: process.platform,
+        architecture: process.arch,
+        downloadsDirectory: app.getPath("downloads"),
+        settings: database,
+        revealFile: (path) => shell.showItemInFolder(path),
+      }),
       createIndexer: (_database, providers) => new WorkerSessionIndexer(
         new Worker(join(__dirname, "indexWorker.cjs"), {
           workerData: {
