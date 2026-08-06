@@ -3,7 +3,13 @@ import { isAbsolute, resolve } from "node:path";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono, type Context } from "hono";
 import { z } from "zod";
-import { TERMINAL_IDS, type ProviderId, type ProviderSourceSetting } from "../shared/types.ts";
+import {
+  CONTEXT_SNIPPET_SORTS,
+  TERMINAL_IDS,
+  type ContextSnippetSort,
+  type ProviderId,
+  type ProviderSourceSetting,
+} from "../shared/types.ts";
 import { isProviderId, PROVIDER_DESCRIPTORS } from "../shared/providers.ts";
 import { renderResumeCommand } from "../shared/resumeCommand.ts";
 import { commandDialectForTerminal, normalizeRuntimePlatform } from "../shared/terminal.ts";
@@ -41,6 +47,30 @@ const metadataSchema = z
   );
 
 const collectionSchema = z.object({ name: z.string().trim().min(1).max(100) });
+const contextContentSchema = z.string().max(1_000_000).refine((value) => value.trim() !== "", {
+  message: "Context content is required",
+});
+const contextSnippetCreateSchema = z.object({
+  title: z.string().trim().min(1).max(200),
+  content: contextContentSchema,
+  favorite: z.boolean().optional(),
+  collectionId: z.number().int().positive().nullable().optional(),
+});
+const contextSnippetPatchSchema = z
+  .object({
+    title: z.string().trim().min(1).max(200).optional(),
+    content: contextContentSchema.optional(),
+    favorite: z.boolean().optional(),
+    collectionId: z.number().int().positive().nullable().optional(),
+  })
+  .refine(
+    (value) =>
+      value.title !== undefined ||
+      value.content !== undefined ||
+      value.favorite !== undefined ||
+      value.collectionId !== undefined,
+    { message: "At least one context field is required" },
+  );
 const resumeCommandTemplateSchema = z.object({ template: z.string().trim().min(1).max(500) });
 const terminalSettingsSchema = z
   .object({
@@ -56,6 +86,18 @@ const providerSourceSchema = z.object({
   enabled: z.boolean(),
   home: z.string().trim().min(1).max(2000).nullable(),
 });
+
+const contextSnippetId = (value: string): number | null => {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+};
+
+const contextSortValue = (value: string | undefined): ContextSnippetSort | null =>
+  value === undefined
+    ? "smart"
+    : CONTEXT_SNIPPET_SORTS.includes(value as ContextSnippetSort)
+      ? value as ContextSnippetSort
+      : null;
 
 const isLoopbackHostname = (hostname: string): boolean =>
   ["localhost", "127.0.0.1", "::1", "[::1]"].includes(hostname.toLocaleLowerCase());
@@ -272,6 +314,88 @@ export const createApp = (options: {
         limit: Number.parseInt(query.limit ?? "50", 10),
       }),
     });
+  });
+
+  app.get("/api/context-snippets", (context) => {
+    const query = context.req.query();
+    const sort = contextSortValue(query.sort);
+    if (sort === null) return context.json({ error: "Invalid context sort" }, 400);
+    const collectionId = collectionValue(query.collection);
+    return context.json({
+      snippets: database.listContextSnippets({
+        ...(query.q === undefined ? {} : { query: query.q }),
+        favoritesOnly: booleanValue(query.favorites),
+        ...(collectionId === undefined ? {} : { collectionId }),
+        sort,
+        limit: Number.parseInt(query.limit ?? "100", 10),
+      }),
+    });
+  });
+
+  app.post("/api/context-snippets", async (context) => {
+    const parsed = contextSnippetCreateSchema.safeParse(await context.req.json());
+    if (!parsed.success) return context.json({ error: parsed.error.issues }, 400);
+    try {
+      return context.json({
+        snippet: database.createContextSnippet({
+          title: parsed.data.title,
+          content: parsed.data.content,
+          ...(parsed.data.favorite === undefined ? {} : { favorite: parsed.data.favorite }),
+          ...(parsed.data.collectionId === undefined
+            ? {}
+            : { collectionId: parsed.data.collectionId }),
+        }),
+      }, 201);
+    } catch (error) {
+      return context.json({ error: String(error) }, 400);
+    }
+  });
+
+  app.get("/api/context-snippets/:id", (context) => {
+    const id = contextSnippetId(context.req.param("id"));
+    if (id === null) return context.json({ error: "Invalid context snippet" }, 400);
+    const snippet = database.getContextSnippet(id);
+    return snippet === null
+      ? context.json({ error: "Context snippet not found" }, 404)
+      : context.json({ snippet });
+  });
+
+  app.patch("/api/context-snippets/:id", async (context) => {
+    const id = contextSnippetId(context.req.param("id"));
+    const parsed = contextSnippetPatchSchema.safeParse(await context.req.json());
+    if (id === null || !parsed.success) return context.json({ error: "Invalid context snippet" }, 400);
+    try {
+      const snippet = database.updateContextSnippet(id, {
+        ...(parsed.data.title === undefined ? {} : { title: parsed.data.title }),
+        ...(parsed.data.content === undefined ? {} : { content: parsed.data.content }),
+        ...(parsed.data.favorite === undefined ? {} : { favorite: parsed.data.favorite }),
+        ...(parsed.data.collectionId === undefined
+          ? {}
+          : { collectionId: parsed.data.collectionId }),
+      });
+      return snippet === null
+        ? context.json({ error: "Context snippet not found" }, 404)
+        : context.json({ snippet });
+    } catch (error) {
+      return context.json({ error: String(error) }, 400);
+    }
+  });
+
+  app.delete("/api/context-snippets/:id", (context) => {
+    const id = contextSnippetId(context.req.param("id"));
+    if (id === null) return context.json({ error: "Invalid context snippet" }, 400);
+    return database.deleteContextSnippet(id)
+      ? context.json({ deleted: true })
+      : context.json({ error: "Context snippet not found" }, 404);
+  });
+
+  app.post("/api/context-snippets/:id/copied", (context) => {
+    const id = contextSnippetId(context.req.param("id"));
+    if (id === null) return context.json({ error: "Invalid context snippet" }, 400);
+    const snippet = database.recordContextSnippetCopy(id);
+    return snippet === null
+      ? context.json({ error: "Context snippet not found" }, 404)
+      : context.json({ snippet });
   });
 
   app.get("/api/collections", (context) =>

@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { PROVIDER_IDS, type ParsedSession, type ProviderId } from "../shared/types.ts";
 import { SearchDatabase } from "./database.ts";
 
@@ -253,7 +253,7 @@ describe("SearchDatabase", () => {
     });
 
     const collection = database.createCollection("生产问题");
-    expect(collection).toMatchObject({ name: "生产问题", sessionCount: 0 });
+    expect(collection).toMatchObject({ name: "生产问题", sessionCount: 0, contextCount: 0 });
 
     const assigned = database.updateMetadata(session.sessionKey, { collectionId: collection.id });
     expect(assigned?.collectionId).toBe(collection.id);
@@ -269,6 +269,103 @@ describe("SearchDatabase", () => {
     expect(database.renameCollection(collection.id, "线上排查")?.name).toBe("线上排查");
     expect(database.deleteCollection(collection.id)).toBe(true);
     expect(database.getSession(session.sessionKey)?.session.collectionId).toBeNull();
+  });
+
+  test("creates, updates, searches, copies, and deletes context snippets", async () => {
+    const database = await createDatabase();
+    const collection = database.createCollection("客服专家");
+    const created = database.createContextSnippet({
+      title: "客服专家项目拓扑",
+      content: "/workspace/performance-mcp\n这是客服专家 MCP，包含 POP 和 Self。",
+      favorite: true,
+      collectionId: collection.id,
+    });
+
+    expect(created).toMatchObject({
+      title: "客服专家项目拓扑",
+      favorite: true,
+      collectionId: collection.id,
+      copyCount: 0,
+    });
+    expect(database.listCollections()[0]).toMatchObject({
+      sessionCount: 0,
+      contextCount: 1,
+    });
+    expect(database.listContextSnippets({ query: "performance-mcp" })[0]).toMatchObject({
+      id: created.id,
+      title: "客服专家项目拓扑",
+    });
+    expect(database.listContextSnippets({ query: "专家" })[0]?.id).toBe(created.id);
+
+    const updated = database.updateContextSnippet(created.id, {
+      title: "客服专家完整上下文",
+      content: "整块上下文原样保存\nshopId=1000225981",
+      favorite: false,
+      collectionId: null,
+    });
+    expect(updated).toMatchObject({
+      title: "客服专家完整上下文",
+      content: "整块上下文原样保存\nshopId=1000225981",
+      favorite: false,
+      collectionId: null,
+    });
+    expect(database.listContextSnippets({ query: "performance-mcp" })).toEqual([]);
+    expect(database.listContextSnippets({ query: "1000225981" })[0]?.id).toBe(created.id);
+
+    expect(database.recordContextSnippetCopy(created.id)).toMatchObject({ copyCount: 1 });
+    expect(database.recordContextSnippetCopy(created.id)).toMatchObject({ copyCount: 2 });
+    expect(database.deleteContextSnippet(created.id)).toBe(true);
+    expect(database.getContextSnippet(created.id)).toBeNull();
+  });
+
+  test("sorts context snippets by favorites, smart score, time, and copy count", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+      const database = await createDatabase();
+      const older = database.createContextSnippet({ title: "常用旧上下文", content: "old" });
+      for (let index = 0; index < 4; index += 1) database.recordContextSnippetCopy(older.id);
+
+      vi.setSystemTime(new Date("2026-02-01T00:00:00.000Z"));
+      const newer = database.createContextSnippet({ title: "新上下文", content: "new" });
+      const favorite = database.createContextSnippet({
+        title: "收藏上下文",
+        content: "favorite",
+        favorite: true,
+      });
+
+      expect(database.listContextSnippets({ sort: "smart" }).map((item) => item.id)).toEqual([
+        favorite.id,
+        older.id,
+        newer.id,
+      ]);
+      expect(database.listContextSnippets({ sort: "created-desc" }).map((item) => item.id)).toEqual([
+        favorite.id,
+        newer.id,
+        older.id,
+      ]);
+      expect(database.listContextSnippets({ sort: "copies-desc" }).map((item) => item.id)).toEqual([
+        favorite.id,
+        older.id,
+        newer.id,
+      ]);
+      expect(database.listContextSnippets({ favoritesOnly: true })).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("removes context assignments when a shared collection is deleted", async () => {
+    const database = await createDatabase();
+    const collection = database.createCollection("共享收藏夹");
+    const snippet = database.createContextSnippet({
+      title: "上下文",
+      content: "正文",
+      collectionId: collection.id,
+    });
+
+    expect(database.deleteCollection(collection.id)).toBe(true);
+    expect(database.getContextSnippet(snippet.id)?.collectionId).toBeNull();
   });
 
   test("provides and persists provider-specific resume command templates", async () => {

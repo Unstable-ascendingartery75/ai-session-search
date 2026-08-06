@@ -5,12 +5,14 @@ export const SearchBox = ({
   inputRef,
   query,
   shortcutLabel,
+  placeholder,
   t,
   onQueryChange,
 }: {
   inputRef: RefObject<HTMLInputElement | null>;
   query: string;
   shortcutLabel: string;
+  placeholder?: string;
   t: Translator;
   onQueryChange: (query: string) => void;
 }) => (
@@ -20,8 +22,8 @@ export const SearchBox = ({
       ref={inputRef}
       value={query}
       onChange={(event) => onQueryChange(event.target.value)}
-      placeholder={t("search.placeholder")}
-      aria-label={t("search.placeholder")}
+      placeholder={placeholder ?? t("search.placeholder")}
+      aria-label={placeholder ?? t("search.placeholder")}
       aria-keyshortcuts="Meta+K Control+K Meta+F Control+F /"
       autoFocus
     />

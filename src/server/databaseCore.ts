@@ -18,6 +18,15 @@ const FTS_DDL = `
   )
 `;
 
+const CONTEXT_FTS_DDL = `
+  CREATE VIRTUAL TABLE IF NOT EXISTS context_snippets_fts USING fts5(
+    snippet_id UNINDEXED,
+    title,
+    content,
+    tokenize='trigram'
+  )
+`;
+
 export const stringColumn = (row: SqlRow, key: string): string => {
   const value = row[key];
   return typeof value === "string" ? value : "";
@@ -153,6 +162,23 @@ export const initializeSearchDatabase = (database: DatabaseSync): void => {
       collection_id INTEGER,
       updated_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS context_snippets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      favorite INTEGER NOT NULL DEFAULT 0 CHECK(favorite IN (0, 1)),
+      collection_id INTEGER,
+      copy_count INTEGER NOT NULL DEFAULT 0,
+      last_copied_at INTEGER,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_context_snippets_collection
+      ON context_snippets(collection_id);
+    CREATE INDEX IF NOT EXISTS idx_context_snippets_created_at
+      ON context_snippets(created_at);
+    CREATE INDEX IF NOT EXISTS idx_context_snippets_updated_at
+      ON context_snippets(updated_at);
     CREATE TABLE IF NOT EXISTS app_settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL,
@@ -170,5 +196,6 @@ export const initializeSearchDatabase = (database: DatabaseSync): void => {
   }
   database.exec("CREATE INDEX IF NOT EXISTS idx_session_metadata_collection ON session_metadata(collection_id)");
   database.exec(FTS_DDL);
+  database.exec(CONTEXT_FTS_DDL);
   removeUnsupportedProviderIndexes(database);
 };

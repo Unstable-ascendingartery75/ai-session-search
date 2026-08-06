@@ -5,14 +5,17 @@ type ShortcutOptions = {
   searchInputRef: RefObject<HTMLInputElement | null>;
   surfaceOpen: boolean;
   dismissActiveSurface: () => boolean;
+  enabled?: boolean;
 };
 
 export const useAppKeyboardShortcuts = ({
   searchInputRef,
   surfaceOpen,
   dismissActiveSurface,
+  enabled = true,
 }: ShortcutOptions): void => {
   useEffect(() => {
+    if (!enabled) return;
     const handleShortcut = (event: KeyboardEvent): void => {
       const action = resolveAppShortcut({
         key: event.key,
@@ -35,7 +38,7 @@ export const useAppKeyboardShortcuts = ({
     };
     window.addEventListener("keydown", handleShortcut);
     return () => window.removeEventListener("keydown", handleShortcut);
-  }, [dismissActiveSurface, searchInputRef, surfaceOpen]);
+  }, [dismissActiveSurface, enabled, searchInputRef, surfaceOpen]);
 };
 
 export const useDialogFocus = (

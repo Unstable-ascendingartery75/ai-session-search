@@ -5,9 +5,9 @@ English | [简体中文](./README.zh-CN.md)
 [![GitHub Release](https://img.shields.io/github/v/release/lililib/ai-session-search)](https://github.com/lililib/ai-session-search/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
-A local-first, read-only search app for AI coding sessions. It discovers local conversations from
-7 coding tools and uses SQLite FTS5 trigram indexing to search natural language, code, paths,
-errors, and Session IDs.
+A local-first search app for AI coding sessions and reusable AI context. It discovers local
+conversations from 7 coding tools and uses SQLite FTS5 trigram indexing to search natural language,
+code, paths, errors, Session IDs, and user-owned context notes. Source sessions remain read-only.
 
 ![AI Session Search interface](./docs/images/ai-session-search.png)
 
@@ -22,8 +22,8 @@ Download from [GitHub Releases](https://github.com/lililib/ai-session-search/rel
 The desktop client requires no Node.js installation. It displays the interface immediately, scans
 sessions in the background, and reports indexing progress. Web and desktop use the same database
 in the current user's system application-data directory, so indexes, favorites, collections,
-renames, and settings are shared. Existing desktop-only metadata is migrated automatically and the
-legacy directory is left intact as a backup.
+renames, reusable contexts, and settings are shared. Existing desktop-only metadata is migrated
+automatically and the legacy directory is left intact as a backup.
 
 Current packages are unsigned, so Gatekeeper or SmartScreen may show a first-launch warning.
 The Windows build is portable: extract the ZIP and run `ai-session-search.exe`; no installer is
@@ -36,6 +36,8 @@ The Windows package requires 64-bit Windows 10 or Windows 11; Windows 7/8/8.1 ar
 
 - Searches across providers, projects, message content, custom titles, and full/partial Session IDs
 - SQLite FTS5 trigram indexing for Chinese, Japanese, Korean, English, and code substrings
+- Context library for saving, editing, searching, organizing, and copying complete AI context blocks
+- Smart context ranking combines copy frequency with creation time, with four explicit sort alternatives
 - Favorites, custom titles, collections, and matching filters
 - Copies Session IDs and customizable resume commands
 - macOS integration with Terminal, iTerm2, Warp, and custom terminal/shell paths
@@ -47,8 +49,8 @@ The Windows package requires 64-bit Windows 10 or Windows 11; Windows 7/8/8.1 ar
 - Shared web/desktop session-source settings with custom paths, enable/disable controls, and live rescanning
 - Automatic English/Simplified Chinese UI; no API key or cloud database required
 
-AI Session Search never modifies source conversations. Titles, collections, settings, and indexes
-are written only to its own SQLite database.
+AI Session Search never modifies source conversations. Context notes, titles, collections, settings,
+and indexes are written only to its own SQLite database.
 
 ## Supported clients
 

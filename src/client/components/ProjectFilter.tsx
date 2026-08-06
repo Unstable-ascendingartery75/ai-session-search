@@ -25,6 +25,7 @@ export const ProjectFilter = ({ projects, value, t, onChange }: ProjectFilterPro
   const [activeIndex, setActiveIndex] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const inputId = useId();
   const listboxId = useId();
   const filteredProjects = useMemo(
     () => filterProjectOptions(projects, query),
@@ -93,15 +94,20 @@ export const ProjectFilter = ({ projects, value, t, onChange }: ProjectFilterPro
 
   return (
     <div className="project-filter project-combobox" ref={rootRef}>
+      <label className="compact-filter-label" htmlFor={inputId}>
+        {t("filter.projectLabel")}
+      </label>
       <input
+        id={inputId}
         ref={inputRef}
         role="combobox"
+        aria-label={t("filter.searchProjects")}
         aria-expanded={open}
         aria-controls={listboxId}
         aria-autocomplete="list"
         aria-activedescendant={open && optionCount > 0 ? `${listboxId}-${activeIndex}` : undefined}
         value={open ? query : value}
-        placeholder={t("filter.allProjects")}
+        placeholder={t("common.all")}
         title={value || t("filter.allProjects")}
         onFocus={openList}
         onClick={openList}

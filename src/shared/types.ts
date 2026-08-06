@@ -102,8 +102,35 @@ export type CollectionSummary = {
   id: number;
   name: string;
   sessionCount: number;
+  contextCount: number;
   createdAt: number;
   updatedAt: number;
+};
+
+export const CONTEXT_SNIPPET_SORTS = [
+  "smart",
+  "created-desc",
+  "updated-desc",
+  "last-copied-desc",
+  "copies-desc",
+] as const;
+
+export type ContextSnippetSort = (typeof CONTEXT_SNIPPET_SORTS)[number];
+
+export type ContextSnippetSummary = {
+  id: number;
+  title: string;
+  preview: string;
+  favorite: boolean;
+  collectionId: number | null;
+  copyCount: number;
+  lastCopiedAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type ContextSnippetDetail = ContextSnippetSummary & {
+  content: string;
 };
 
 export type SearchResult = SessionSummary & {

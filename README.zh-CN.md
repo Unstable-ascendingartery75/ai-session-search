@@ -5,8 +5,9 @@
 [![GitHub Release](https://img.shields.io/github/v/release/lililib/ai-session-search)](https://github.com/lililib/ai-session-search/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
-本地优先、只读的 AI 编程会话搜索器。自动发现 7 种编程工具的本地会话，并使用
-SQLite FTS5 trigram 索引搜索自然语言、代码、路径、错误信息和 Session ID。
+本地优先的 AI 编程会话搜索与上下文管理工具。自动发现 7 种编程工具的本地会话，并使用
+SQLite FTS5 trigram 索引搜索自然语言、代码、路径、错误信息、Session ID 和用户保存的
+上下文；来源会话始终保持只读。
 
 ![AI Session Search 界面](./docs/images/ai-session-search.png)
 
@@ -20,7 +21,7 @@ SQLite FTS5 trigram 索引搜索自然语言、代码、路径、错误信息和
 
 客户端不需要安装 Node.js。启动后会立即显示界面，在后台扫描会话并展示索引进度。
 Web 和桌面端使用当前用户系统应用数据目录中的同一个数据库，因此索引、收藏、收藏夹、
-重命名和设置可以共用。已有的桌面端专用元数据会自动迁移，旧目录会保留作为备份。
+重命名、上下文和设置可以共用。已有的桌面端专用元数据会自动迁移，旧目录会保留作为备份。
 
 当前发布包尚未签名，首次打开可能出现 Gatekeeper 或 SmartScreen 提示。Windows 版本为
 便携版：解压 ZIP 后运行 `ai-session-search.exe`，无需安装。“在终端中恢复”支持 macOS
@@ -32,6 +33,8 @@ Windows 包要求 64 位 Windows 10 或 Windows 11，不支持 Windows 7/8/8.1�
 
 - 跨来源、项目、消息内容、自定义名称和完整/部分 Session ID 搜索
 - SQLite FTS5 trigram 全文索引，支持中文、日文、韩文、英文和代码子串
+- 上下文库支持整段内容的新增、编辑、删除、全文搜索、收藏夹管理和原样复制
+- 上下文默认按复制次数与创建时间智能排序，并提供另外四种明确排序方式
 - 收藏、重命名、收藏夹分类及对应筛选
 - 复制 Session ID 和可自定义的恢复命令
 - macOS 支持 Terminal、iTerm2、Warp 和自定义终端/Shell
@@ -43,7 +46,7 @@ Windows 包要求 64 位 Windows 10 或 Windows 11，不支持 Windows 7/8/8.1�
 - Web/桌面端共用会话来源设置，支持自定义路径、启用/禁用和即时重新扫描
 - 简体中文/英文界面自动切换；无需 API Key 或云端数据库
 
-本项目不会修改任何来源会话。名称、收藏夹、设置和索引只写入自己的 SQLite 数据库。
+本项目不会修改任何来源会话。上下文、名称、收藏夹、设置和索引只写入自己的 SQLite 数据库。
 
 ## 支持的客户端
 

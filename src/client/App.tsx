@@ -1,5 +1,5 @@
 import { useLingui } from "@lingui/react";
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type {
   CollectionSummary,
   NormalizedMessage,
@@ -29,6 +29,11 @@ import {
 import { SearchBox } from "./components/SearchBox.tsx";
 import { UpdateNotification } from "./components/UpdateNotification.tsx";
 import { ProjectFilter } from "./components/ProjectFilter.tsx";
+import { ProviderFilter } from "./components/ProviderFilter.tsx";
+import { SelectControl } from "./components/SelectControl.tsx";
+import { HighlightedText } from "./components/HighlightedText.tsx";
+import { AppViewTabs, type AppView } from "./components/AppViewTabs.tsx";
+import { ContextLibrary } from "./components/ContextLibrary.tsx";
 import {
   commandDialectForTerminal,
   defaultTerminalSettings,
@@ -40,8 +45,9 @@ import {
   parseStoredSidebarWidth,
   SIDEBAR_STORAGE_KEY,
 } from "./sidebarWidth.ts";
-import { splitTextByLiteralQuery } from "./textHighlight.ts";
 import { useAppKeyboardShortcuts, useDialogFocus } from "./useAppKeyboardShortcuts.ts";
+import { jsonRequest, queryString } from "./api.ts";
+import { copyText } from "./clipboard.ts";
 
 type Project = { provider: ProviderId; projectPath: string; count: number };
 type SessionDetail = { session: SessionSummary; messages: NormalizedMessage[] };
@@ -71,69 +77,22 @@ const initialSidebarWidth = (): number => {
   }
 };
 
-const jsonRequest = async <T,>(input: string, init?: RequestInit): Promise<T> => {
-  const response = await fetch(input, init);
-  if (!response.ok) {
-    const body = await response.json().catch(() => null) as { error?: unknown } | null;
-    const detail = typeof body?.error === "string" ? `: ${body.error}` : "";
-    throw new Error(`Request failed: ${response.status}${detail}`);
-  }
-  return response.json() as Promise<T>;
-};
-
-const queryString = (values: Record<string, string | boolean | undefined>): string => {
-  const params = new URLSearchParams();
-  for (const [key, value] of Object.entries(values)) {
-    if (value === undefined || value === "" || value === false) continue;
-    params.set(key, String(value));
-  }
-  return params.toString();
-};
-
 const providerLabel = (provider: ProviderId): string => providerDescriptor(provider).label;
 const providerColor = (provider: ProviderId): string => providerDescriptor(provider).color;
 
 const isSearchResult = (item: SessionSummary | SearchResult): item is SearchResult =>
   "messageIndex" in item;
 
-const HighlightedText = ({ text, query }: { text: string; query: string }) =>
-  splitTextByLiteralQuery(text, query).map((part, index) =>
-    part.highlighted ? (
-      <mark className="search-highlight" key={index}>{part.value}</mark>
-    ) : (
-      <Fragment key={index}>{part.value}</Fragment>
-    ),
-  );
-
 const formatDate = (value: string, locale: string): string => {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "" : date.toLocaleString(locale);
-};
-
-const copyText = async (value: string, unavailableMessage: string): Promise<void> => {
-  if (navigator.clipboard?.writeText !== undefined) {
-    try {
-      await navigator.clipboard.writeText(value);
-      return;
-    } catch {
-      // Fall back to document.execCommand for browsers that block the Clipboard API.
-    }
-  }
-  const textarea = document.createElement("textarea");
-  textarea.value = value;
-  textarea.style.position = "fixed";
-  textarea.style.opacity = "0";
-  document.body.append(textarea);
-  textarea.select();
-  const copied = document.execCommand("copy");
-  textarea.remove();
-  if (!copied) throw new Error(unavailableMessage);
 };
 
 export const App = () => {
   const { i18n } = useLingui();
   const t: Translator = (id, values) => i18n._(id, values);
   const locale = i18n.locale || "en";
+  const [appView, setAppView] = useState<AppView>("sessions");
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [provider, setProvider] = useState<ProviderId | "all">("all");
@@ -209,7 +168,12 @@ export const App = () => {
     providerSourcesCloseRef,
     providerSourcesWasOpenRef,
   );
-  useAppKeyboardShortcuts({ searchInputRef, surfaceOpen: shortcutSurfaceOpen, dismissActiveSurface });
+  useAppKeyboardShortcuts({
+    searchInputRef,
+    surfaceOpen: shortcutSurfaceOpen,
+    dismissActiveSurface,
+    enabled: appView === "sessions",
+  });
 
   const applyProviderSourceSettings = (settings: ProviderSourceSetting[]): void => {
     setProviderSourceSettings(settings);
@@ -625,6 +589,74 @@ export const App = () => {
     }
   };
 
+  const sidebarResizer = (
+    <div
+      className="sidebar-resizer"
+      role="separator"
+      aria-label={t("sidebar.resize")}
+      aria-orientation="vertical"
+      aria-valuemin={280}
+      aria-valuemax={720}
+      aria-valuenow={sidebarWidth}
+      tabIndex={0}
+      onDoubleClick={() => saveSidebarWidth(applySidebarWidth(DEFAULT_SIDEBAR_WIDTH))}
+      onPointerDown={(event) => {
+        resizingSidebarRef.current = true;
+        event.currentTarget.setPointerCapture(event.pointerId);
+        document.body.classList.add("resizing-sidebar");
+      }}
+      onPointerMove={(event) => {
+        if (!resizingSidebarRef.current) return;
+        applySidebarWidth(event.clientX);
+      }}
+      onPointerUp={(event) => {
+        if (!resizingSidebarRef.current) return;
+        resizingSidebarRef.current = false;
+        event.currentTarget.releasePointerCapture(event.pointerId);
+        document.body.classList.remove("resizing-sidebar");
+        saveSidebarWidth(sidebarWidthRef.current);
+      }}
+      onPointerCancel={() => {
+        resizingSidebarRef.current = false;
+        document.body.classList.remove("resizing-sidebar");
+        saveSidebarWidth(sidebarWidthRef.current);
+      }}
+      onKeyDown={(event) => {
+        const delta = event.key === "ArrowLeft" ? -24 : event.key === "ArrowRight" ? 24 : 0;
+        const requestedWidth =
+          event.key === "Home"
+            ? 0
+            : event.key === "End"
+              ? Number.MAX_SAFE_INTEGER
+              : sidebarWidthRef.current + delta;
+        if (delta === 0 && event.key !== "Home" && event.key !== "End") return;
+        event.preventDefault();
+        saveSidebarWidth(applySidebarWidth(requestedWidth));
+      }}
+    />
+  );
+
+  if (appView === "contexts") {
+    return (
+      <div
+        className="app-shell"
+        ref={appShellRef}
+        style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}
+      >
+        <ContextLibrary
+          t={t}
+          locale={locale}
+          searchShortcutLabel={searchShortcutLabel}
+          sidebarResizer={sidebarResizer}
+          onShowSessions={() => {
+            setAppView("sessions");
+            void refreshSidebar().catch((caught: unknown) => setError(String(caught)));
+          }}
+        />
+      </div>
+    );
+  }
+
   return (
     <div
       className="app-shell"
@@ -641,6 +673,8 @@ export const App = () => {
           <UpdateNotification t={t} />
         </header>
 
+        <AppViewTabs active="sessions" t={t} onChange={setAppView} />
+
         {syncProgress?.running === true && <IndexingStatus progress={syncProgress} t={t} />}
 
         <SearchBox
@@ -651,13 +685,13 @@ export const App = () => {
           onQueryChange={setQuery}
         />
 
-        <div className="filters">
-          <select value={provider} onChange={(event) => setProvider(event.target.value as ProviderId | "all") }>
-            <option value="all">{t("filter.allProviders")}</option>
-            {visibleProviders.map((item) => (
-              <option key={item.id} value={item.id}>{item.label}</option>
-            ))}
-          </select>
+        <div className="filters session-filters">
+          <ProviderFilter
+            providers={visibleProviders}
+            value={provider}
+            t={t}
+            onChange={setProvider}
+          />
           <ProjectFilter
             projects={visibleProjects}
             value={projectPath}
@@ -666,32 +700,37 @@ export const App = () => {
           />
           <button
             className={favoritesOnly ? "filter-button active" : "filter-button"}
+            aria-pressed={favoritesOnly}
+            title={t("filter.favoritesOnly")}
             onClick={() => setFavoritesOnly((value) => !value)}
           >
             ★ {t("filter.favoritesOnly")}
           </button>
           <button
             className={renamedOnly ? "filter-button active" : "filter-button"}
+            aria-pressed={renamedOnly}
+            title={t("filter.renamedOnly")}
             onClick={() => setRenamedOnly((value) => !value)}
           >
             ✎ {t("filter.renamedOnly")}
           </button>
-          <select
+          <SelectControl
             className="collection-filter"
             value={collectionFilter}
-            onChange={(event) => {
-              setCollectionFilter(event.target.value);
+            ariaLabel={t("filter.allCollections")}
+            options={[
+              { value: "all", label: t("filter.allCollections") },
+              { value: "unassigned", label: t("collection.unassigned") },
+              ...collections.map((collection) => ({
+                value: String(collection.id),
+                label: `${collection.name} (${collection.sessionCount})`,
+              })),
+            ]}
+            onChange={(value) => {
+              setCollectionFilter(value);
               setCollectionEditor(null);
             }}
-          >
-            <option value="all">{t("filter.allCollections")}</option>
-            <option value="unassigned">{t("collection.unassigned")}</option>
-            {collections.map((collection) => (
-              <option key={collection.id} value={collection.id}>
-                {collection.name} ({collection.sessionCount})
-              </option>
-            ))}
-          </select>
+          />
           <div className="collection-actions">
             <button
               onClick={() => {
@@ -816,50 +855,7 @@ export const App = () => {
         </footer>
       </aside>
 
-      <div
-        className="sidebar-resizer"
-        role="separator"
-        aria-label={t("sidebar.resize")}
-        aria-orientation="vertical"
-        aria-valuemin={280}
-        aria-valuemax={720}
-        aria-valuenow={sidebarWidth}
-        tabIndex={0}
-        onDoubleClick={() => saveSidebarWidth(applySidebarWidth(DEFAULT_SIDEBAR_WIDTH))}
-        onPointerDown={(event) => {
-          resizingSidebarRef.current = true;
-          event.currentTarget.setPointerCapture(event.pointerId);
-          document.body.classList.add("resizing-sidebar");
-        }}
-        onPointerMove={(event) => {
-          if (!resizingSidebarRef.current) return;
-          applySidebarWidth(event.clientX);
-        }}
-        onPointerUp={(event) => {
-          if (!resizingSidebarRef.current) return;
-          resizingSidebarRef.current = false;
-          event.currentTarget.releasePointerCapture(event.pointerId);
-          document.body.classList.remove("resizing-sidebar");
-          saveSidebarWidth(sidebarWidthRef.current);
-        }}
-        onPointerCancel={() => {
-          resizingSidebarRef.current = false;
-          document.body.classList.remove("resizing-sidebar");
-          saveSidebarWidth(sidebarWidthRef.current);
-        }}
-        onKeyDown={(event) => {
-          const delta = event.key === "ArrowLeft" ? -24 : event.key === "ArrowRight" ? 24 : 0;
-          const requestedWidth =
-            event.key === "Home"
-              ? 0
-              : event.key === "End"
-                ? Number.MAX_SAFE_INTEGER
-                : sidebarWidthRef.current + delta;
-          if (delta === 0 && event.key !== "Home" && event.key !== "End") return;
-          event.preventDefault();
-          saveSidebarWidth(applySidebarWidth(requestedWidth));
-        }}
-      />
+      {sidebarResizer}
 
       <main className="conversation-pane">
         {selected === null ? (
@@ -968,25 +964,25 @@ export const App = () => {
                 <code>{selected.session.projectPath ?? t("session.unknownProject")}</code>
                 <span>{t("session.messageCount", { count: selected.session.messageCount })}</span>
                 <time>{formatDate(selected.session.updatedAt, locale)}</time>
-                <label className="collection-assignment">
-                  {t("collection.label")}
-                  <select
-                    value={selected.session.collectionId ?? ""}
-                    onChange={(event) => {
-                      const value = event.target.value;
+                <div className="collection-assignment">
+                  <span>{t("collection.label")}</span>
+                  <SelectControl
+                    value={selected.session.collectionId === null ? "" : String(selected.session.collectionId)}
+                    ariaLabel={t("collection.label")}
+                    options={[
+                      { value: "", label: t("collection.unassigned") },
+                      ...collections.map((collection) => ({
+                        value: String(collection.id),
+                        label: collection.name,
+                      })),
+                    ]}
+                    onChange={(value) => {
                       void updateMetadata(selected.session, {
                         collectionId: value === "" ? null : Number.parseInt(value, 10),
                       });
                     }}
-                  >
-                    <option value="">{t("collection.unassigned")}</option>
-                    {collections.map((collection) => (
-                      <option key={collection.id} value={collection.id}>
-                        {collection.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                  />
+                </div>
               </div>
               {editingResumeCommand && (
                 <div className="resume-command-editor">
@@ -1037,15 +1033,16 @@ export const App = () => {
                     <>
                       <div className="terminal-settings">
                         <label htmlFor="terminal-kind">{t("terminal.type")}</label>
-                        <select
+                        <SelectControl
                           id="terminal-kind"
                           value={terminalDraft}
-                          onChange={(event) => updateTerminalDraft(event.target.value as TerminalId)}
-                        >
-                          {availableTerminalIds.map((terminal) => (
-                            <option key={terminal} value={terminal}>{terminalLabel(terminal)}</option>
-                          ))}
-                        </select>
+                          ariaLabel={t("terminal.type")}
+                          options={availableTerminalIds.map((terminal) => ({
+                            value: terminal,
+                            label: terminalLabel(terminal),
+                          }))}
+                          onChange={updateTerminalDraft}
+                        />
                         {terminalDraft === "custom" && (
                           <input
                             value={customTerminalPathDraft}

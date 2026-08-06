@@ -2,6 +2,9 @@ import { DatabaseSync } from "node:sqlite";
 import { isAbsolute } from "node:path";
 import type {
   CollectionSummary,
+  ContextSnippetDetail,
+  ContextSnippetSort,
+  ContextSnippetSummary,
   NormalizedMessage,
   ParsedSession,
   ProviderId,
@@ -34,6 +37,44 @@ import {
   type SqlValue,
 } from "./databaseCore.ts";
 import type { SessionFile } from "./providers/types.ts";
+
+const contextPreview = (content: string, query = ""): string => {
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const matchIndex = normalizedQuery === "" ? -1 : content.toLocaleLowerCase().indexOf(normalizedQuery);
+  const start = Math.max(0, matchIndex < 0 ? 0 : matchIndex - 60);
+  const end = Math.min(content.length, start + 220);
+  return `${start > 0 ? "…" : ""}${content.slice(start, end)}${end < content.length ? "…" : ""}`;
+};
+
+const toContextSnippetDetail = (row: SqlRow, query = ""): ContextSnippetDetail => {
+  const content = stringColumn(row, "content");
+  return {
+    id: numberColumn(row, "id"),
+    title: stringColumn(row, "title"),
+    content,
+    preview: contextPreview(content, query),
+    favorite: numberColumn(row, "favorite") === 1,
+    collectionId:
+      row.collection_id === null || row.collection_id === undefined
+        ? null
+        : numberColumn(row, "collection_id"),
+    copyCount: numberColumn(row, "copy_count"),
+    lastCopiedAt:
+      row.last_copied_at === null || row.last_copied_at === undefined
+        ? null
+        : numberColumn(row, "last_copied_at"),
+    createdAt: numberColumn(row, "created_at"),
+    updatedAt: numberColumn(row, "updated_at"),
+  };
+};
+
+const contextSmartScore = (snippet: ContextSnippetSummary, now: number): number => {
+  const ageDays = Math.max(0, now - snippet.createdAt) / 86_400_000;
+  return 3 * Math.log2(snippet.copyCount + 1) + 5 / (1 + ageDays / 30);
+};
+
+const compareNullableTimeDesc = (left: number | null, right: number | null): number =>
+  (right ?? Number.NEGATIVE_INFINITY) - (left ?? Number.NEGATIVE_INFINITY);
 
 export class SearchDatabase {
   readonly #db: DatabaseSync;
@@ -477,6 +518,197 @@ export class SearchDatabase {
     };
   }
 
+  createContextSnippet(input: {
+    title: string;
+    content: string;
+    favorite?: boolean;
+    collectionId?: number | null;
+  }): ContextSnippetDetail {
+    const title = input.title.replace(/\s+/g, " ").trim();
+    if (title === "" || title.length > 200) {
+      throw new Error("Context title must contain 1 to 200 characters");
+    }
+    if (input.content.trim() === "" || input.content.length > 1_000_000) {
+      throw new Error("Context content must contain 1 to 1000000 characters");
+    }
+    const collectionId = input.collectionId ?? null;
+    if (collectionId !== null) this.#assertCollectionExists(collectionId);
+    const now = Date.now();
+
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      const result = this.#db.prepare(`
+        INSERT INTO context_snippets(
+          title, content, favorite, collection_id, copy_count,
+          last_copied_at, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, 0, NULL, ?, ?)
+      `).run(title, input.content, input.favorite === true ? 1 : 0, collectionId, now, now);
+      const id = Number(result.lastInsertRowid);
+      this.#db.prepare(`
+        INSERT INTO context_snippets_fts(snippet_id, title, content) VALUES (?, ?, ?)
+      `).run(id, title, input.content);
+      this.#db.exec("COMMIT");
+      const created = this.getContextSnippet(id);
+      if (created === null) throw new Error("Created context snippet could not be loaded");
+      return created;
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  listContextSnippets(options?: {
+    query?: string;
+    favoritesOnly?: boolean;
+    collectionId?: number | null;
+    sort?: ContextSnippetSort;
+    limit?: number;
+  }): ContextSnippetSummary[] {
+    const query = options?.query?.trim() ?? "";
+    const filters: string[] = [];
+    const values: SqlValue[] = [];
+    if (options?.favoritesOnly === true) filters.push("c.favorite = 1");
+    if (options?.collectionId === null) filters.push("c.collection_id IS NULL");
+    else if (options?.collectionId !== undefined) {
+      filters.push("c.collection_id = ?");
+      values.push(options.collectionId);
+    }
+
+    let rows: SqlRow[];
+    if (query === "") {
+      const where = filters.length === 0 ? "" : `WHERE ${filters.join(" AND ")}`;
+      rows = this.#db.prepare(`
+        SELECT c.*, 0 fts_rank FROM context_snippets c ${where}
+      `).all(...values) as SqlRow[];
+    } else if (query.length < 3) {
+      filters.unshift("(c.title LIKE ? ESCAPE '\\' OR c.content LIKE ? ESCAPE '\\')");
+      const like = escapeLikeQuery(query);
+      values.unshift(like, like);
+      rows = this.#db.prepare(`
+        SELECT c.*, 0 fts_rank
+        FROM context_snippets c
+        WHERE ${filters.join(" AND ")}
+      `).all(...values) as SqlRow[];
+    } else {
+      filters.unshift("context_snippets_fts MATCH ?");
+      values.unshift(escapeFtsQuery(query));
+      rows = this.#db.prepare(`
+        SELECT c.*, bm25(context_snippets_fts, 0.0, 5.0, 1.0) fts_rank
+        FROM context_snippets_fts
+        JOIN context_snippets c ON c.id = CAST(context_snippets_fts.snippet_id AS INTEGER)
+        WHERE ${filters.join(" AND ")}
+      `).all(...values) as SqlRow[];
+    }
+
+    const details = rows.map((row) => ({
+      detail: toContextSnippetDetail(row, query),
+      ftsRank: Number(row.fts_rank ?? 0),
+    }));
+    const sort = options?.sort ?? "smart";
+    const now = Date.now();
+    details.sort((leftEntry, rightEntry) => {
+      const left = leftEntry.detail;
+      const right = rightEntry.detail;
+      if (query !== "") {
+        const normalizedQuery = query.toLocaleLowerCase();
+        const leftTitle = left.title.toLocaleLowerCase();
+        const rightTitle = right.title.toLocaleLowerCase();
+        const exactDifference = Number(rightTitle === normalizedQuery) - Number(leftTitle === normalizedQuery);
+        if (exactDifference !== 0) return exactDifference;
+        const titleDifference = Number(rightTitle.includes(normalizedQuery)) - Number(leftTitle.includes(normalizedQuery));
+        if (titleDifference !== 0) return titleDifference;
+        const relevanceDifference = leftEntry.ftsRank - rightEntry.ftsRank;
+        if (relevanceDifference !== 0) return relevanceDifference;
+      }
+      const favoriteDifference = Number(right.favorite) - Number(left.favorite);
+      if (favoriteDifference !== 0) return favoriteDifference;
+      if (sort === "created-desc") return right.createdAt - left.createdAt || right.id - left.id;
+      if (sort === "updated-desc") return right.updatedAt - left.updatedAt || right.id - left.id;
+      if (sort === "last-copied-desc") {
+        return compareNullableTimeDesc(left.lastCopiedAt, right.lastCopiedAt) || right.id - left.id;
+      }
+      if (sort === "copies-desc") {
+        return right.copyCount - left.copyCount || right.updatedAt - left.updatedAt || right.id - left.id;
+      }
+      return contextSmartScore(right, now) - contextSmartScore(left, now) || right.updatedAt - left.updatedAt || right.id - left.id;
+    });
+    const limit = Math.min(Math.max(options?.limit ?? 100, 1), 500);
+    return details.slice(0, limit).map(({ detail }) => {
+      const { content: _content, ...summary } = detail;
+      return summary;
+    });
+  }
+
+  getContextSnippet(id: number): ContextSnippetDetail | null {
+    const row = this.#db.prepare("SELECT * FROM context_snippets WHERE id = ?").get(id) as SqlRow | undefined;
+    return row === undefined ? null : toContextSnippetDetail(row);
+  }
+
+  updateContextSnippet(
+    id: number,
+    patch: { title?: string; content?: string; favorite?: boolean; collectionId?: number | null },
+  ): ContextSnippetDetail | null {
+    const current = this.getContextSnippet(id);
+    if (current === null) return null;
+    const title = patch.title === undefined ? current.title : patch.title.replace(/\s+/g, " ").trim();
+    const content = patch.content === undefined ? current.content : patch.content;
+    if (title === "" || title.length > 200) {
+      throw new Error("Context title must contain 1 to 200 characters");
+    }
+    if (content.trim() === "" || content.length > 1_000_000) {
+      throw new Error("Context content must contain 1 to 1000000 characters");
+    }
+    const collectionId = patch.collectionId === undefined ? current.collectionId : patch.collectionId;
+    if (collectionId !== null) this.#assertCollectionExists(collectionId);
+    const favorite = patch.favorite ?? current.favorite;
+    const now = Date.now();
+
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      this.#db.prepare(`
+        UPDATE context_snippets
+        SET title = ?, content = ?, favorite = ?, collection_id = ?, updated_at = ?
+        WHERE id = ?
+      `).run(title, content, favorite ? 1 : 0, collectionId, now, id);
+      this.#db.prepare("DELETE FROM context_snippets_fts WHERE snippet_id = ?").run(id);
+      this.#db.prepare(`
+        INSERT INTO context_snippets_fts(snippet_id, title, content) VALUES (?, ?, ?)
+      `).run(id, title, content);
+      this.#db.exec("COMMIT");
+      return this.getContextSnippet(id);
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  deleteContextSnippet(id: number): boolean {
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      this.#db.prepare("DELETE FROM context_snippets_fts WHERE snippet_id = ?").run(id);
+      const result = this.#db.prepare("DELETE FROM context_snippets WHERE id = ?").run(id);
+      this.#db.exec("COMMIT");
+      return result.changes > 0;
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  recordContextSnippetCopy(id: number): ContextSnippetDetail | null {
+    const result = this.#db.prepare(`
+      UPDATE context_snippets
+      SET copy_count = copy_count + 1, last_copied_at = ?
+      WHERE id = ?
+    `).run(Date.now(), id);
+    return result.changes === 0 ? null : this.getContextSnippet(id);
+  }
+
+  #assertCollectionExists(id: number): void {
+    const collectionExists = this.#db.prepare("SELECT 1 present FROM collections WHERE id = ?").get(id);
+    if (collectionExists === undefined) throw new Error("Collection not found");
+  }
+
   updateMetadata(
     sessionKey: string,
     patch: { customTitle?: string | null; favorite?: boolean; collectionId?: number | null },
@@ -541,17 +773,28 @@ export class SearchDatabase {
     const result = this.#db
       .prepare("INSERT INTO collections(name, created_at, updated_at) VALUES (?, ?, ?)")
       .run(normalized, now, now);
-    return { id: Number(result.lastInsertRowid), name: normalized, sessionCount: 0, createdAt: now, updatedAt: now };
+    return {
+      id: Number(result.lastInsertRowid),
+      name: normalized,
+      sessionCount: 0,
+      contextCount: 0,
+      createdAt: now,
+      updatedAt: now,
+    };
   }
 
   listCollections(): CollectionSummary[] {
     const rows = this.#db
       .prepare(`
-        SELECT c.id, c.name, c.created_at, c.updated_at, COUNT(s.session_key) session_count
+        SELECT c.id, c.name, c.created_at, c.updated_at,
+               (SELECT COUNT(*)
+                FROM session_metadata m
+                JOIN sessions s ON s.session_key = m.session_key
+                WHERE m.collection_id = c.id) session_count,
+               (SELECT COUNT(*)
+                FROM context_snippets n
+                WHERE n.collection_id = c.id) context_count
         FROM collections c
-        LEFT JOIN session_metadata m ON m.collection_id = c.id
-        LEFT JOIN sessions s ON s.session_key = m.session_key
-        GROUP BY c.id, c.name, c.created_at, c.updated_at
         ORDER BY c.name COLLATE NOCASE
       `)
       .all() as SqlRow[];
@@ -559,6 +802,7 @@ export class SearchDatabase {
       id: numberColumn(row, "id"),
       name: stringColumn(row, "name"),
       sessionCount: numberColumn(row, "session_count"),
+      contextCount: numberColumn(row, "context_count"),
       createdAt: numberColumn(row, "created_at"),
       updatedAt: numberColumn(row, "updated_at"),
     }));
@@ -581,6 +825,9 @@ export class SearchDatabase {
     try {
       this.#db
         .prepare("UPDATE session_metadata SET collection_id = NULL, updated_at = ? WHERE collection_id = ?")
+        .run(Date.now(), id);
+      this.#db
+        .prepare("UPDATE context_snippets SET collection_id = NULL, updated_at = ? WHERE collection_id = ?")
         .run(Date.now(), id);
       const result = this.#db.prepare("DELETE FROM collections WHERE id = ?").run(id);
       this.#db.exec("COMMIT");

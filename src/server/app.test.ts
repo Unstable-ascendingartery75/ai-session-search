@@ -155,6 +155,84 @@ describe("provider source settings API", () => {
   });
 });
 
+describe("context snippets API", () => {
+  test("supports context CRUD, search filters, and successful copy tracking", async () => {
+    const { app } = await createFixture();
+    const collectionResponse = await app.request("http://127.0.0.1:3411/api/collections", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "客服专家" }),
+    });
+    const collectionBody = await collectionResponse.json() as { collection: { id: number } };
+
+    const createResponse = await app.request("http://127.0.0.1:3411/api/context-snippets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: "客服专家调查上下文",
+        content: "保留完整大段正文\nshopId=1000225981",
+        favorite: true,
+        collectionId: collectionBody.collection.id,
+      }),
+    });
+    expect(createResponse.status).toBe(201);
+    const createBody = await createResponse.json() as { snippet: { id: number } };
+
+    const listResponse = await app.request(
+      `http://127.0.0.1:3411/api/context-snippets?q=1000225981&collection=${collectionBody.collection.id}&favorites=1&sort=smart`,
+    );
+    expect(await listResponse.json()).toMatchObject({
+      snippets: [expect.objectContaining({
+        id: createBody.snippet.id,
+        title: "客服专家调查上下文",
+      })],
+    });
+
+    const patchResponse = await app.request(
+      `http://127.0.0.1:3411/api/context-snippets/${createBody.snippet.id}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: "更新后的整块正文" }),
+      },
+    );
+    expect(await patchResponse.json()).toMatchObject({
+      snippet: { content: "更新后的整块正文" },
+    });
+
+    const copyResponse = await app.request(
+      `http://127.0.0.1:3411/api/context-snippets/${createBody.snippet.id}/copied`,
+      { method: "POST" },
+    );
+    expect(await copyResponse.json()).toMatchObject({ snippet: { copyCount: 1 } });
+
+    const deleteResponse = await app.request(
+      `http://127.0.0.1:3411/api/context-snippets/${createBody.snippet.id}`,
+      { method: "DELETE" },
+    );
+    expect(deleteResponse.status).toBe(200);
+    const missingResponse = await app.request(
+      `http://127.0.0.1:3411/api/context-snippets/${createBody.snippet.id}`,
+    );
+    expect(missingResponse.status).toBe(404);
+  });
+
+  test("rejects empty context content and unsupported sort values", async () => {
+    const { app } = await createFixture();
+    const createResponse = await app.request("http://127.0.0.1:3411/api/context-snippets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "空内容", content: "   " }),
+    });
+    expect(createResponse.status).toBe(400);
+
+    const listResponse = await app.request(
+      "http://127.0.0.1:3411/api/context-snippets?sort=unknown",
+    );
+    expect(listResponse.status).toBe(400);
+  });
+});
+
 describe("terminal launch API", () => {
   test("stores terminal settings and launches a server-rendered resume command", async () => {
     const { app, terminalLauncher } = await createFixture();
